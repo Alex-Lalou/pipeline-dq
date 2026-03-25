@@ -409,6 +409,7 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
   <div class="lp-mode-bar">
     <div class="lp-mode on" id="mode-code" onclick="setMode('code')">⟨/⟩ Code</div>
     <div class="lp-mode" id="mode-data" onclick="setMode('data')">⊞ Données</div>
+    <div class="lp-mode" id="mode-compare" onclick="setMode('compare')">⇄ Comparer</div>
   </div>
 
   <!-- CODE MODE -->
@@ -500,6 +501,45 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
   </div>
 </div>
 
+
+  <!-- COMPARE MODE -->
+  <div class="lp-section hidden" id="sec-compare">
+    <div class="lp-head">
+      <div class="flbl" style="margin-bottom:10px">Comparer deux arrêtés</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--nxl-teal);border-radius:3px;padding:10px 12px">
+          <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--nxl-teal);margin-bottom:8px">Arrêté A</div>
+          <div class="field" style="margin-bottom:6px">
+            <div class="flbl">Libellé</div>
+            <input id="cmp-label-a" placeholder="ex: 2024-06-30" style="font-family:var(--mono);font-size:11px">
+          </div>
+          <div style="border:1px dashed var(--border2);border-radius:3px;padding:10px;text-align:center;position:relative;cursor:pointer" id="cmp-drop-a">
+            <input type="file" accept=".csv,.xlsx,.xls" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%" onchange="loadCompareFile('a', this.files[0])">
+            <div id="cmp-name-a" style="font-family:var(--mono);font-size:10px;color:var(--text2)">Cliquez ou glissez un fichier</div>
+          </div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:3px;padding:10px 12px">
+          <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--amber);margin-bottom:8px">Arrêté B</div>
+          <div class="field" style="margin-bottom:6px">
+            <div class="flbl">Libellé</div>
+            <input id="cmp-label-b" placeholder="ex: 2024-12-31" style="font-family:var(--mono);font-size:11px">
+          </div>
+          <div style="border:1px dashed var(--border2);border-radius:3px;padding:10px;text-align:center;position:relative;cursor:pointer" id="cmp-drop-b">
+            <input type="file" accept=".csv,.xlsx,.xls" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%" onchange="loadCompareFile('b', this.files[0])">
+            <div id="cmp-name-b" style="font-family:var(--mono);font-size:10px;color:var(--text2)">Cliquez ou glissez un fichier</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="lp-foot">
+      <button class="btn btn-primary btn-full" id="btn-compare" onclick="runComparison()" disabled>
+        <div class="spinner" id="cmp-spin" style="display:none"></div>
+        <span id="cmp-lbl">⇄ Lancer la comparaison</span>
+      </button>
+      <div id="cmp-status" style="display:none"></div>
+    </div>
+  </div>
+
 <!-- ═══ RIGHT PANEL ═══ -->
 <div class="rp">
   <div class="rp-tabs" id="rp-tabs">
@@ -544,9 +584,9 @@ let lang = 'SAS';
 // ═══════════════════════════════════════════════════
 function setMode(m) {
   appMode = m;
-  ['code','data'].forEach(id => {
-    document.getElementById('mode-'+id).classList.toggle('on', id===m);
-    document.getElementById('sec-'+id).classList.toggle('hidden', id!==m);
+  ['code','data','compare'].forEach(id => {
+    document.getElementById('mode-'+id)?.classList.toggle('on', id===m);
+    document.getElementById('sec-'+id)?.classList.toggle('hidden', id!==m);
   });
 }
 
@@ -569,7 +609,10 @@ function buildTabs() {
     tabs.push({id:'dict',label:'Dictionnaire',cls:''});
     tabs.push({id:'raw',label:'JSON',cls:''});
   }
-  if (Object.keys(dqResults).length) {
+  if (dqResults['__compare__']) {
+    tabs.push({id:'compare-result',label:'⇄ Comparaison',cls:'green'});
+  }
+  if (Object.keys(dqResults).filter(k=>k!=='__compare__').length) {
     tabs.push({id:'dq-data',label:'◉ DQ Données',cls:'green'});
     tabs.push({id:'profiling',label:'Profiling',cls:'green'});
     tabs.push({id:'issues',label:'Anomalies',cls:'green'});
@@ -595,6 +638,7 @@ function renderContent() {
   const el = document.getElementById('rp-content');
   const render = {
     welcome: renderWelcome,
+    'compare-result': renderCompareResult,
     pipeline: renderPipeline,
     mermaid: renderMermaidView,
     'dq-code': renderDQCode,
@@ -2133,6 +2177,207 @@ function showMermaidStep(tableId) {
   const panel = document.getElementById('mmaid-detail');
   if (panel) { panel.innerHTML = html; panel.scrollTop = 0; }
 }
+
+// ═══════════════════════════════════════════════════
+// ─── COMPARISON MODE ───────────────────────────────
+// ═══════════════════════════════════════════════════
+let cmpData = { a: null, b: null };
+
+function loadCompareFile(side, file) {
+  if (!file) return;
+  const name = file.name;
+  const ext = name.split('.').pop().toLowerCase();
+  document.getElementById('cmp-name-'+side).textContent = name;
+  document.getElementById('cmp-drop-'+side).style.borderColor = side==='a' ? 'var(--nxl-teal)' : 'var(--amber)';
+
+  const done = (rows, headers) => {
+    cmpData[side] = { rows, headers, name };
+    if (cmpData.a && cmpData.b) document.getElementById('btn-compare').disabled = false;
+  };
+
+  if (ext === 'csv') {
+    Papa.parse(file, {
+      header:true, skipEmptyLines:true, dynamicTyping:false,
+      complete: r => done(r.data, r.meta.fields||[])
+    });
+  } else {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {defval:null, raw:false});
+      done(rows, rows.length ? Object.keys(rows[0]) : []);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+function runComparison() {
+  if (!cmpData.a || !cmpData.b) return;
+  setBtnLoad('btn-compare','cmp-spin','cmp-lbl','Comparaison en cours…');
+
+  setTimeout(() => {
+    const result = compareDatasets(cmpData.a, cmpData.b);
+    const labelA = document.getElementById('cmp-label-a').value || 'Arrêté A';
+    const labelB = document.getElementById('cmp-label-b').value || 'Arrêté B';
+    result.labelA = labelA;
+    result.labelB = labelB;
+
+    // Store in dqResults under special key and show in right panel
+    dqResults['__compare__'] = result;
+    buildTabs();
+    setTab('compare-result', null);
+    showStatus('cmp', `✓ Comparaison terminée — ${result.common.length} colonnes communes`);
+    setBtnLoad('btn-compare','cmp-spin','cmp-lbl','⇄ Relancer', false);
+  }, 50);
+}
+
+function compareDatasets(dsA, dsB) {
+  const hA = new Set(dsA.headers);
+  const hB = new Set(dsB.headers);
+  const common = dsA.headers.filter(h => hB.has(h));
+  const onlyA = dsA.headers.filter(h => !hB.has(h));
+  const onlyB = dsB.headers.filter(h => !hA.has(h));
+
+  const colComparisons = common.map(h => {
+    const valsA = dsA.rows.map(r => r[h]).filter(v => v!==null&&v!==undefined&&String(v).trim()!=='').map(v=>String(v).trim());
+    const valsB = dsB.rows.map(r => r[h]).filter(v => v!==null&&v!==undefined&&String(v).trim()!=='').map(v=>String(v).trim());
+    const setA = new Set(valsA);
+    const setB = new Set(valsB);
+
+    const nullRateA = round2((dsA.rows.length - valsA.length) / dsA.rows.length * 100);
+    const nullRateB = round2((dsB.rows.length - valsB.length) / dsB.rows.length * 100);
+    const distinctA = setA.size;
+    const distinctB = setB.size;
+
+    // New values in B not in A, and disappeared from A
+    const newInB = [...setB].filter(v => !setA.has(v));
+    const goneFromA = [...setA].filter(v => !setB.has(v));
+
+    // Distribution shift for numerics
+    const numsA = valsA.map(v=>parseFloat(v.replace(/,/g,'.'))).filter(v=>!isNaN(v));
+    const numsB = valsB.map(v=>parseFloat(v.replace(/,/g,'.'))).filter(v=>!isNaN(v));
+    let distShift = null;
+    if (numsA.length > 10 && numsB.length > 10) {
+      const meanA = numsA.reduce((s,v)=>s+v,0)/numsA.length;
+      const meanB = numsB.reduce((s,v)=>s+v,0)/numsB.length;
+      const pctChange = meanA !== 0 ? round2((meanB-meanA)/Math.abs(meanA)*100) : null;
+      distShift = { meanA: round2(meanA), meanB: round2(meanB), pctChange };
+    }
+
+    const alerts = [];
+    const nullDiff = nullRateB - nullRateA;
+    if (Math.abs(nullDiff) >= 5) alerts.push({ msg: `Taux de nulls ${nullDiff>0?'+':''}${round2(nullDiff)}pp`, sev: Math.abs(nullDiff)>=20?'high':'medium' });
+    if (newInB.length > 0 && newInB.length <= 20) alerts.push({ msg: `${newInB.length} nouvelle(s) valeur(s)`, sev:'low' });
+    if (goneFromA.length > 0 && goneFromA.length <= 20) alerts.push({ msg: `${goneFromA.length} valeur(s) disparue(s)`, sev:'low' });
+    if (distShift && Math.abs(distShift.pctChange) >= 10) alerts.push({ msg: `Moyenne ${distShift.pctChange>0?'+':''}${distShift.pctChange}%`, sev: Math.abs(distShift.pctChange)>=30?'high':'medium' });
+
+    return { name:h, nullRateA, nullRateB, distinctA, distinctB, newInB: newInB.slice(0,10), goneFromA: goneFromA.slice(0,10), distShift, alerts };
+  });
+
+  return {
+    rowsA: dsA.rows.length, rowsB: dsB.rows.length,
+    colsA: dsA.headers.length, colsB: dsB.headers.length,
+    common, onlyA, onlyB, colComparisons
+  };
+}
+
+function renderCompareResult() {
+  const r = dqResults['__compare__'];
+  if (!r) return '<div class="notice notice-amber">Aucune comparaison disponible.</div>';
+
+  const scoreColor = v => v>=90?'var(--green)':v>=70?'var(--amber)':'var(--red)';
+  const rowDiff = r.rowsB - r.rowsA;
+  const rowPct = r.rowsA ? round2(rowDiff/r.rowsA*100) : 0;
+
+  let html = '';
+
+  // Header summary
+  html += `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center;margin-bottom:20px">
+    <div style="background:var(--bg1);border:1px solid var(--border);border-top:3px solid var(--nxl-teal);border-radius:3px;padding:14px 16px">
+      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--nxl-teal);margin-bottom:8px">${r.labelA}</div>
+      <div style="font-family:var(--mono);font-size:22px;font-weight:700">${r.rowsA.toLocaleString()}</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:2px">${r.colsA} colonnes</div>
+    </div>
+    <div style="text-align:center">
+      <div style="font-size:24px;color:var(--text3)">⇄</div>
+      <div style="font-family:var(--mono);font-size:11px;color:${rowDiff>=0?'var(--green)':'var(--red)'};font-weight:700;margin-top:4px">${rowDiff>=0?'+':''}${rowDiff.toLocaleString()} lignes</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text2)">${rowPct>=0?'+':''}${rowPct}%</div>
+    </div>
+    <div style="background:var(--bg1);border:1px solid var(--border);border-top:3px solid var(--amber);border-radius:3px;padding:14px 16px">
+      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:8px">${r.labelB}</div>
+      <div style="font-family:var(--mono);font-size:22px;font-weight:700">${r.rowsB.toLocaleString()}</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:2px">${r.colsB} colonnes</div>
+    </div>
+  </div>`;
+
+  // Column structure changes
+  if (r.onlyA.length || r.onlyB.length) {
+    html += `<div style="background:var(--bg1);border:1px solid var(--border);border-radius:3px;padding:12px 14px;margin-bottom:16px">
+      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text2);margin-bottom:8px">Structure des colonnes</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div style="font-size:11px;color:var(--text1)">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--nxl-teal)">${r.common.length}</span> colonnes communes
+        </div>
+        ${r.onlyA.length ? `<div style="font-size:11px;color:var(--red)"><span style="font-family:var(--mono);font-size:10px">${r.onlyA.length}</span> uniquement dans ${r.labelA} : <span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${r.onlyA.slice(0,5).join(', ')}${r.onlyA.length>5?'…':''}</span></div>` : ''}
+        ${r.onlyB.length ? `<div style="font-size:11px;color:var(--amber)"><span style="font-family:var(--mono);font-size:10px">${r.onlyB.length}</span> uniquement dans ${r.labelB} : <span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${r.onlyB.slice(0,5).join(', ')}${r.onlyB.length>5?'…':''}</span></div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // Alerts summary
+  const allAlerts = r.colComparisons.flatMap(c => c.alerts.map(a => ({...a, col:c.name})));
+  const highAlerts = allAlerts.filter(a => a.sev==='high');
+  const medAlerts = allAlerts.filter(a => a.sev==='medium');
+
+  if (highAlerts.length || medAlerts.length) {
+    html += `<div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text2);margin-bottom:8px">Alertes de changement</div>`;
+    [...highAlerts, ...medAlerts].slice(0,8).forEach(a => {
+      html += `<div style="display:flex;gap:8px;padding:7px 10px;background:var(--bg2);border-radius:3px;border-left:2px solid ${a.sev==='high'?'var(--amber)':'var(--nxl-teal)'};margin-bottom:4px;align-items:center">
+        <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${a.sev==='high'?'var(--amber)':'var(--nxl-teal)'}">${a.col}</span>
+        <span style="font-size:11px;color:var(--text2);flex:1">${a.msg}</span>
+      </div>`;
+    });
+    html += '<div style="margin-bottom:16px"></div>';
+  }
+
+  // Column by column table
+  html += `<div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text2);margin-bottom:8px">Comparaison par colonne</div>
+  <div style="overflow-x:auto"><table class="tbl">
+    <thead><tr>
+      <th>Colonne</th>
+      <th>Nulls ${r.labelA}</th>
+      <th>Nulls ${r.labelB}</th>
+      <th>Δ Nulls</th>
+      <th>Distincts ${r.labelA}</th>
+      <th>Distincts ${r.labelB}</th>
+      <th>Nouvelles valeurs</th>
+      <th>Valeurs disparues</th>
+      ${r.colComparisons.some(c=>c.distShift) ? `<th>Δ Moyenne</th>` : ''}
+    </tr></thead>
+    <tbody>
+    ${r.colComparisons.map(c => {
+      const nullDiff = round2(c.nullRateB - c.nullRateA);
+      const nullColor = Math.abs(nullDiff)>=20?'var(--red)':Math.abs(nullDiff)>=5?'var(--amber)':'var(--text1)';
+      const hasAlert = c.alerts.length > 0;
+      return `<tr style="${hasAlert?'background:rgba(177,0,49,.03)':''}">
+        <td><span style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:${hasAlert?'var(--nxl-red)':'var(--text0)'}">${c.name}</span></td>
+        <td style="font-family:var(--mono);font-size:10px">${c.nullRateA}%</td>
+        <td style="font-family:var(--mono);font-size:10px">${c.nullRateB}%</td>
+        <td style="font-family:var(--mono);font-size:10px;color:${nullColor};font-weight:700">${nullDiff>0?'+':''}${nullDiff}pp</td>
+        <td style="font-family:var(--mono);font-size:10px">${c.distinctA.toLocaleString()}</td>
+        <td style="font-family:var(--mono);font-size:10px">${c.distinctB.toLocaleString()}</td>
+        <td style="font-size:10px;color:var(--nxl-teal)">${c.newInB.length ? c.newInB.slice(0,3).join(', ')+(c.newInB.length>3?` +${c.newInB.length-3}`:'') : '—'}</td>
+        <td style="font-size:10px;color:var(--amber)">${c.goneFromA.length ? c.goneFromA.slice(0,3).join(', ')+(c.goneFromA.length>3?` +${c.goneFromA.length-3}`:'') : '—'}</td>
+        ${r.colComparisons.some(cc=>cc.distShift) ? `<td style="font-family:var(--mono);font-size:10px;color:${c.distShift&&Math.abs(c.distShift.pctChange)>=10?'var(--amber)':'var(--text2)'}">${c.distShift ? (c.distShift.pctChange>0?'+':'')+c.distShift.pctChange+'%' : '—'}</td>` : ''}
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table></div>`;
+
+  return html;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   buildTabs();
   renderContent();
