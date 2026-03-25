@@ -499,14 +499,12 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
       <div id="dq-status" style="display:none"></div>
     </div>
   </div>
-</div>
-
 
   <!-- COMPARE MODE -->
   <div class="lp-section hidden" id="sec-compare">
-    <div class="lp-head">
-      <div class="flbl" style="margin-bottom:10px">Comparer deux arrêtés</div>
-      <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="lp-body">
+      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+        <div class="flbl" style="margin-bottom:2px">Comparer deux arrêtés</div>
         <div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--nxl-teal);border-radius:3px;padding:10px 12px">
           <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--nxl-teal);margin-bottom:8px">Arrêté A</div>
           <div class="field" style="margin-bottom:6px">
@@ -539,6 +537,7 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
       <div id="cmp-status" style="display:none"></div>
     </div>
   </div>
+</div>
 
 <!-- ═══ RIGHT PANEL ═══ -->
 <div class="rp">
@@ -588,6 +587,13 @@ function setMode(m) {
     document.getElementById('mode-'+id)?.classList.toggle('on', id===m);
     document.getElementById('sec-'+id)?.classList.toggle('hidden', id!==m);
   });
+  // En mode compare, on cache l'écran d'accueil du panneau droit
+  const rpContent = document.getElementById('rp-content');
+  if (m === 'compare') {
+    rpContent.style.visibility = 'hidden';
+  } else {
+    rpContent.style.visibility = '';
+  }
 }
 
 function setLang(el) {
