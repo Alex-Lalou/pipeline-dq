@@ -676,7 +676,7 @@ JSON attendu (sans markdown):
 }`}]
       })
     });
-    const timeoutPromise = new Promise((_,reject) => setTimeout(() => reject(new Error('TIMEOUT')), 60000));
+    const timeoutPromise = new Promise((_,reject) => setTimeout(() => reject(new Error('TIMEOUT')), 120000));
     const resp = await Promise.race([fetchPromise, timeoutPromise]);
     if (!resp.ok) throw new Error('API '+resp.status);
     clearInterval(timer);
