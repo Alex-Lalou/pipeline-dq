@@ -56,8 +56,7 @@
   --title: 'Montserrat', 'Segoe UI', sans-serif; /* titres — charte */
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{height:100%}
-body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:14px;height:100%;overflow:hidden}
+body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:14px;min-height:100vh;overflow-x:hidden}
 
 /* ─── SHELL ─── */
 .shell{display:grid;grid-template-rows:58px auto 1fr;height:100vh}
@@ -161,9 +160,9 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
 .rp-tab:hover{color:var(--text0)}
 .rp-tab.on{color:var(--nxl-red);border-bottom-color:var(--nxl-red)}
 .rp-tab.green.on{color:var(--nxl-teal);border-bottom-color:var(--nxl-teal)}
-.rp-content{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;min-height:0}
+.rp-content{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column}
 /* ─── EMPTY STATE ─── */
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;min-height:0;gap:16px;padding:40px;text-align:center}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center}
 .empty-icon{font-size:38px;opacity:.18}
 .empty-title{font-family:var(--title);font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text2)}
 .empty-sub{font-size:12px;color:var(--text2);line-height:1.7;max-width:360px;font-family:var(--sans)}
@@ -509,16 +508,7 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
     <div class="rp-tab on" data-tab="empty" onclick="setTab('empty',this)" style="display:none"></div>
     <div class="rp-tab on" id="tab-welcome" data-tab="welcome">Accueil</div>
   </div>
-  <div class="rp-content" id="rp-content" style="display:flex;flex-direction:column">
-    <div class="empty fu" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0">
-      <div class="empty-icon">◈</div>
-      <div class="empty-title">Pipeline Doc + DQ Analyzer</div>
-      <div class="empty-sub">
-        <strong style="color:var(--text1)">Mode Code ⟨/⟩</strong> — Collez du SAS, Python ou R pour extraire automatiquement le pipeline, le dictionnaire, la DQ et le data lineage via l'IA.<br><br>
-        <strong style="color:var(--green)">Mode Données ⊞</strong> — Importez des fichiers CSV ou Excel pour profiler réellement vos tables : complétude, unicité, validité, outliers, distribution et recommandations IA.
-      </div>
-    </div>
-  </div>
+  <div class="rp-content" id="rp-content"></div>
 </div>
 </div>
 </div>
@@ -1416,26 +1406,12 @@ ${JSON.stringify(summary,null,2)}`}]
 // ─── RENDER FUNCTIONS ─────────────────────────────
 // ═══════════════════════════════════════════════════
 function renderWelcome() {
-  return `<div class="empty fu" style="height:100%;justify-content:center;padding:60px 40px">
-    <svg width="52" height="52" viewBox="0 0 100 100" fill="none" style="margin-bottom:8px;opacity:.35">
-      <path d="M50 50 L68 8 L58 5 Z" fill="#B10031"/>
-      <path d="M50 50 L95 30 L90 20 Z" fill="#B10031"/>
-      <path d="M50 50 L92 68 L86 60 Z" fill="#651724"/>
-      <path d="M50 50 L68 95 L58 92 Z" fill="#B10031" opacity=".8"/>
-      <path d="M50 50 L32 95 L22 88 Z" fill="#B10031" opacity=".8"/>
-      <path d="M50 50 L8 68 L10 58 Z" fill="#223E55"/>
-      <path d="M50 50 L8 32 L14 22 Z" fill="#B10031"/>
-      <path d="M50 50 L32 5 L42 8 Z" fill="#B10031"/>
-    </svg>
-    <div class="empty-title" style="font-size:16px;margin-bottom:12px">Pipeline Doc + DQ Analyzer</div>
-    <div class="empty-sub" style="max-width:420px;line-height:1.9;font-size:12px">
-      <div style="margin-bottom:16px">Outil de documentation automatique de pipelines de données et d'analyse de qualité pour la modélisation de risque de crédit.</div>
-      <div style="display:flex;flex-direction:column;gap:10px;text-align:left;background:var(--bg1);border:1px solid var(--border);border-radius:4px;padding:14px 18px">
-        <div><span style="color:var(--acc);font-family:var(--mono);font-weight:700">⟨/⟩ Code</span> — Collez du SAS, Python ou R pour extraire automatiquement le pipeline, le dictionnaire, la DQ et le data lineage via l'IA.</div>
-        <div style="border-top:1px solid var(--border);padding-top:10px"><span style="color:var(--teal);font-family:var(--mono);font-weight:700">⊞ Données</span> — Importez des fichiers CSV ou Excel pour profiler réellement vos tables : complétude, unicité, validité, outliers, distribution et recommandations IA.</div>
-      </div>
-    </div>
-  </div>`;
+  return `<div class="empty fu"><div class="empty-icon">◈</div>
+    <div class="empty-title">Pipeline Doc + DQ Analyzer</div>
+    <div class="empty-sub">
+      <strong style="color:var(--text1)">Mode Code ⟨/⟩</strong> — Collez du SAS, Python ou R pour extraire automatiquement le pipeline, le dictionnaire, la DQ et le data lineage via l'IA.<br><br>
+      <strong style="color:var(--green)">Mode Données ⊞</strong> — Importez des fichiers CSV ou Excel pour profiler réellement vos tables : complétude, unicité, validité, outliers, distribution et recommandations IA.
+    </div></div>`;
 }
 
 // ─── PIPELINE (code result) ───
@@ -2159,6 +2135,10 @@ function showMermaidStep(tableId) {
   const panel = document.getElementById('mmaid-detail');
   if (panel) { panel.innerHTML = html; panel.scrollTop = 0; }
 }
+document.addEventListener('DOMContentLoaded', function() {
+  buildTabs();
+  renderContent();
+});
 </script>
 </body>
 </html>
