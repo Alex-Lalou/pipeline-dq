@@ -636,7 +636,7 @@ async function analyseCode() {
   document.getElementById('code-progress').style.display = 'block';
   document.getElementById('code-status').style.display = 'none';
   const t0 = Date.now();
-  const T = 60000;
+  const T = 120000;
   const timer = setInterval(() => {
     const elapsed = Date.now() - t0;
     const pct = Math.min(98, Math.round(98 * (1 - Math.exp(-3 * elapsed / T))));
@@ -676,7 +676,7 @@ JSON attendu (sans markdown):
 }`}]
       })
     });
-    const timeoutPromise = new Promise((_,reject) => setTimeout(() => reject(new Error('TIMEOUT')), 120000));
+    const timeoutPromise = new Promise((_,reject) => setTimeout(() => reject(new Error('TIMEOUT')), 180000));
     const resp = await Promise.race([fetchPromise, timeoutPromise]);
     if (!resp.ok) throw new Error('API '+resp.status);
     clearInterval(timer);
@@ -699,7 +699,7 @@ JSON attendu (sans markdown):
     clearInterval(timer);
     document.getElementById('code-progress').style.display = 'none';
     const msg = e.message === 'TIMEOUT'
-      ? 'Timeout (60s) — vérifiez votre clé API ou réessayez'
+      ? 'Timeout (120s) — vérifiez votre clé API ou réessayez'
       : e.message === 'Failed to fetch'
       ? 'Erreur réseau — vérifiez que votre clé API est bien enregistrée (⚿ en haut à droite)'
       : 'Erreur: ' + e.name + ' — ' + e.message;
