@@ -85,7 +85,7 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
 .logo-sep{width:1px;height:22px;background:var(--border2);margin:0 2px}
 .logo-tool{font-family:var(--title);font-size:12px;font-weight:500;letter-spacing:.08em;color:var(--text1);display:flex;align-items:center;gap:8px}
 .logo-sub{color:var(--text2);font-size:10px;letter-spacing:.04em;font-weight:400}
-.body{display:grid;grid-template-columns:420px 1fr;overflow:hidden;height:100%}
+.body{display:grid;grid-template-columns:560px 1fr;overflow:hidden;height:100%}
 
 /* ─── LEFT PANEL ─── */
 .lp{background:var(--bg1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
@@ -2009,53 +2009,43 @@ async function initMermaidView() {
 function buildMermaidDef() {
   if (!codeData) return 'flowchart TD\n  A[Aucune donnée]';
 
-  const typeStyle = {
-    source:    'fill:#071830,stroke:#00c8e0,color:#00c8e0,stroke-width:1.5px',
-    intermediate:'fill:#180a0c,stroke:#B10031,color:#B10031,stroke-width:1.5px',
-    master:    'fill:#1e1505,stroke:#f0a030,color:#f0a030,stroke-width:1.5px',
-    final:     'fill:#051a10,stroke:#00c89a,color:#00c89a,stroke-width:2px',
-  };
+  const sanitize = s => s.replace(/[^a-zA-Z0-9_]/g, '_');
+  const safeLabel = s => (s||'').replace(/"/g,"'").replace(/[<>{}|]/g,'').slice(0, 25);
 
   let lines = ['flowchart TD'];
 
-  // Nodes
+  // Class definitions
+  lines.push('  classDef source fill:#071830,stroke:#409ABB,color:#409ABB');
+  lines.push('  classDef intermediate fill:#180a0c,stroke:#B10031,color:#B10031');
+  lines.push('  classDef master fill:#1e1505,stroke:#e08a20,color:#e08a20');
+  lines.push('  classDef final fill:#051a10,stroke:#1a9e6a,color:#1a9e6a');
+  lines.push('');
+
+  // Nodes — simple rectangular shape, sanitized labels
   codeData.tables.forEach(t => {
-    const id = t.id.replace(/[^a-zA-Z0-9_]/g,'_');
-    const short = (t.short||'').replace(/"/g,"'").slice(0,30);
-    const rows = t.columns?.length ? `${t.columns.length} col.` : '';
-    // Use different shapes per type
-    const shape = t.type === 'source' ? `[/"${t.id}\\n${short}"/]`
-                : t.type === 'final'  ? `(["${t.id}\\n${short}"])`
-                : `["${t.id}\\n${short}"]`;
-    lines.push(`  ${id}${shape}`);
+    const id = sanitize(t.id);
+    const lbl = safeLabel(t.short || t.id);
+    lines.push(`  ${id}["${t.id}\\n${lbl}"]`);
   });
 
   lines.push('');
 
-  // Flows / arrows with optional label
-  (codeData.flows||[]).forEach(([from, to]) => {
-    const f = from.replace(/[^a-zA-Z0-9_]/g,'_');
-    const t2 = to.replace(/[^a-zA-Z0-9_]/g,'_');
-    // Find join type hint from target's sources
-    const target = codeData.tables.find(t=>t.id===to);
-    const isJoin = (target?.sources||[]).length > 1;
-    const arrow = isJoin ? `-- JOIN -->` : `-->`;
-    lines.push(`  ${f} ${arrow} ${t2}`);
+  // Flows
+  (codeData.flows || []).forEach(([from, to]) => {
+    const f = sanitize(from);
+    const t2 = sanitize(to);
+    const target = codeData.tables.find(t => t.id === to);
+    const isJoin = (target?.sources || []).length > 1;
+    lines.push(`  ${f} ${isJoin ? '-- JOIN -->' : '-->'} ${t2}`);
   });
 
   lines.push('');
 
-  // Style classes
-  Object.entries(typeStyle).forEach(([type, style]) => {
-    const ids = (codeData.tables||[]).filter(t=>t.type===type).map(t=>t.id.replace(/[^a-zA-Z0-9_]/g,'_'));
-    if (ids.length) lines.push(`  style ${ids.join(',style ')} ${style.split(',').map(s=>`${ids[0]} ${s}`)[0]}`);
-  });
-
-  // Individual style per node
-  (codeData.tables||[]).forEach(t => {
-    const id = t.id.replace(/[^a-zA-Z0-9_]/g,'_');
-    const s = typeStyle[t.type] || typeStyle.intermediate;
-    lines.push(`  style ${id} ${s}`);
+  // Apply classes
+  codeData.tables.forEach(t => {
+    const id = sanitize(t.id);
+    const cls = t.type || 'intermediate';
+    lines.push(`  class ${id} ${cls}`);
   });
 
   return lines.join('\n');
