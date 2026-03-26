@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root {
   /* ══ NEXIALOG CHARTE GRAPHIQUE 2025 — couleurs exactes ══ */
@@ -700,7 +701,7 @@ async function analyseCode() {
     const fetchPromise = fetch('https://api.anthropic.com/v1/messages', {
       method:'POST', headers:buildHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:16000,
+        model:'claude-sonnet-4-5-20251001', max_tokens:16000,
         system:`Tu es expert en modélisation de risque de crédit. Analyse du code ${lang} et retourne UNIQUEMENT du JSON valide, sans markdown.`,
         messages:[{role:'user', content:`Analyse ce code ${lang} et retourne un JSON structuré.
 Projet: ${document.getElementById('proj-name').value||'PIPELINE'} | Auteur: ${document.getElementById('proj-author').value||''}
@@ -1424,7 +1425,7 @@ async function runAIInsights() {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST', headers:buildHeaders(),
     body:JSON.stringify({
-      model:'claude-sonnet-4-6', max_tokens:3000,
+      model:'claude-sonnet-4-5-20251001', max_tokens:3000,
       system:'Tu es expert en Data Quality pour la modélisation de risque de crédit. Réponds uniquement en JSON valide, sans markdown.',
       messages:[{role:'user',content:`Analyse ces résultats DQ de tables destinées à la modélisation de risque de crédit.
 Retourne un JSON avec:
@@ -1655,6 +1656,225 @@ function getCurrentDQTable() {
   return first ? { name:first, dq:dqResults[first] } : null;
 }
 
+function exportExcel() {
+  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  if (!names.length) return;
+
+  const wb = XLSX.utils.book_new();
+
+  names.forEach(name => {
+    const dq = dqResults[name];
+
+    // Feuille résumé
+    const summaryData = [
+      ['Rapport DQ — ' + name],
+      [],
+      ['Score global', Math.round(dq.overallScore) + '%'],
+      ['Complétude', Math.round(dq.completeness) + '%'],
+      ['Unicité', Math.round(dq.uniqueness) + '%'],
+      ['Validité', Math.round(dq.validity) + '%'],
+      ['Nb lignes', dq.rowCount],
+      ['Nb colonnes', dq.colCount],
+      ['Anomalies critiques', dq.issues.filter(i=>i.sev==='critical').length],
+      ['Anomalies élevées', dq.issues.filter(i=>i.sev==='high').length],
+      [],
+      ['PROFIL PAR COLONNE'],
+      ['Colonne','Type','Complétude %','Unicité %','Validité %','Valeurs nulles','Distincts','Anomalies'],
+      ...dq.columns.map(c => [c.name, c.type, c.completeness, c.uniqueness, c.validity, c.nullCount, c.distinct, c.issues.length]),
+      [],
+      ['ANOMALIES DÉTECTÉES'],
+      ['Colonne','Message','Sévérité'],
+      ...dq.issues.map(i => [i.field, i.msg, i.sev])
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(summaryData);
+    ws['!cols'] = [{wch:30},{wch:12},{wch:14},{wch:12},{wch:12},{wch:16},{wch:12},{wch:12}];
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0,31));
+  });
+
+  XLSX.writeFile(wb, 'rapport_dq_nexialog.xlsx');
+}
+
+function exportPDF() {
+  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  if (!names.length) return;
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W = 210, margin = 18, contentW = W - margin*2;
+  let y = 0;
+
+  const RED = [177, 0, 49], NAVY = [0, 32, 96], TEAL = [64, 154, 187];
+  const DARK = [16, 19, 26], MID = [30, 36, 51], LIGHT = [208, 209, 212];
+
+  const checkPage = (needed=10) => {
+    if (y + needed > 280) { doc.addPage(); y = 20; }
+  };
+
+  names.forEach((name, tableIdx) => {
+    const dq = dqResults[name];
+    if (tableIdx > 0) { doc.addPage(); y = 0; }
+
+    // ── HEADER ──
+    doc.setFillColor(...NAVY);
+    doc.rect(0, 0, W, 28, 'F');
+    doc.setFillColor(...RED);
+    doc.rect(0, 0, 4, 28, 'F');
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(13);
+    doc.text('NEXIALOG CONSULTING', margin, 11);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...LIGHT);
+    doc.text('Rapport Data Quality — Pipeline Doc + DQ Analyzer', margin, 17);
+    doc.text(new Date().toLocaleDateString('fr-FR', {day:'2-digit',month:'long',year:'numeric'}), W-margin, 17, {align:'right'});
+    y = 36;
+
+    // ── TABLE NAME ──
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(14);
+    doc.setTextColor(...NAVY);
+    doc.text(name, margin, y);
+    y += 5;
+    doc.setFillColor(...RED);
+    doc.rect(margin, y, 30, 0.8, 'F');
+    y += 8;
+
+    // ── SCORE HERO ──
+    const score = Math.round(dq.overallScore);
+    const scoreColor = score>=90?[26,158,106]:score>=70?[224,138,32]:RED;
+
+    doc.setFillColor(22,27,37);
+    doc.roundedRect(margin, y, contentW, 22, 2, 2, 'F');
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(22);
+    doc.setTextColor(...scoreColor);
+    doc.text(score+'%', margin+8, y+14);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...LIGHT);
+    doc.text('Score qualité global', margin+22, y+7);
+    doc.text(dq.rowCount.toLocaleString()+' lignes · '+dq.colCount+' colonnes', margin+22, y+13);
+
+    // mini bars
+    const dims = [
+      ['Complétude', dq.completeness, TEAL],
+      ['Unicité', dq.uniqueness, [26,158,106]],
+      ['Validité', dq.validity, [224,138,32]],
+    ];
+    let bx = margin + contentW - 120;
+    dims.forEach(([lbl, val, col]) => {
+      doc.setFontSize(7);
+      doc.setTextColor(...LIGHT);
+      doc.text(lbl, bx, y+8);
+      doc.setFillColor(30,36,51);
+      doc.roundedRect(bx, y+10, 35, 2, 1, 1, 'F');
+      doc.setFillColor(...col);
+      doc.roundedRect(bx, y+10, Math.max(35*val/100,1), 2, 1, 1, 'F');
+      doc.setTextColor(...col);
+      doc.setFont('helvetica','bold');
+      doc.text(Math.round(val)+'%', bx+37, y+12);
+      doc.setFont('helvetica','normal');
+      bx += 42;
+    });
+    y += 28;
+
+    // ── ANOMALIES CRITIQUES ──
+    const critHigh = dq.issues.filter(i=>['critical','high'].includes(i.sev));
+    if (critHigh.length) {
+      checkPage(10 + critHigh.slice(0,5).length*8);
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...NAVY);
+      doc.text('ANOMALIES CRITIQUES & ÉLEVÉES', margin, y);
+      y += 5;
+
+      critHigh.slice(0,8).forEach(iss => {
+        checkPage(8);
+        const sevColor = iss.sev==='critical' ? RED : [224,138,32];
+        doc.setFillColor(22,27,37);
+        doc.roundedRect(margin, y, contentW, 7, 1, 1, 'F');
+        doc.setFillColor(...sevColor);
+        doc.rect(margin, y, 2, 7, 'F');
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...sevColor);
+        doc.text((iss.field||'—').slice(0,20), margin+5, y+4.5);
+        doc.setFont('helvetica','normal');
+        doc.setTextColor(...LIGHT);
+        doc.text(iss.msg.slice(0,70), margin+45, y+4.5);
+        y += 8;
+      });
+      if (critHigh.length > 8) {
+        doc.setFontSize(7); doc.setTextColor(...LIGHT);
+        doc.text('+ '+(critHigh.length-8)+' autres anomalies — voir export Excel pour le détail complet', margin, y);
+        y += 5;
+      }
+      y += 4;
+    }
+
+    // ── PROFIL COLONNES ──
+    checkPage(20);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...NAVY);
+    doc.text('PROFIL PAR COLONNE', margin, y);
+    y += 5;
+
+    // Header table
+    const cols = [{l:'Colonne',w:50},{l:'Type',w:18},{l:'Complétude',w:22},{l:'Unicité',w:18},{l:'Validité',w:18},{l:'Nulls',w:18},{l:'Anomalies',w:20}];
+    doc.setFillColor(...NAVY);
+    doc.rect(margin, y, contentW, 6, 'F');
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(7);
+    doc.setTextColor(255,255,255);
+    let cx = margin+2;
+    cols.forEach(col => { doc.text(col.l, cx, y+4); cx += col.w; });
+    y += 6;
+
+    dq.columns.forEach((col, ri) => {
+      checkPage(6);
+      if (ri%2===0) { doc.setFillColor(22,27,37); doc.rect(margin, y, contentW, 5.5, 'F'); }
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(7);
+      const cColor = col.issues.length ? RED : LIGHT;
+      doc.setTextColor(...cColor);
+      cx = margin+2;
+      doc.text(col.name.slice(0,22), cx, y+3.8); cx += cols[0].w;
+      doc.setTextColor(...LIGHT);
+      doc.text(col.type, cx, y+3.8); cx += cols[1].w;
+      const pctColor = v => v>=95?[26,158,106]:v>=80?[224,138,32]:RED;
+      doc.setTextColor(...pctColor(col.completeness));
+      doc.text(col.completeness+'%', cx, y+3.8); cx += cols[2].w;
+      doc.setTextColor(...LIGHT);
+      doc.text(col.uniqueness+'%', cx, y+3.8); cx += cols[3].w;
+      doc.setTextColor(...pctColor(col.validity));
+      doc.text(col.validity+'%', cx, y+3.8); cx += cols[4].w;
+      doc.setTextColor(...LIGHT);
+      doc.text(col.nullCount.toLocaleString(), cx, y+3.8); cx += cols[5].w;
+      doc.setTextColor(col.issues.length?RED[0]:LIGHT[0], col.issues.length?RED[1]:LIGHT[1], col.issues.length?RED[2]:LIGHT[2]);
+      doc.text(col.issues.length ? col.issues.length+' ⚠' : '✓', cx, y+3.8);
+      y += 5.5;
+    });
+
+    // ── FOOTER ──
+    const pageCount = doc.getNumberOfPages();
+    for (let i=1;i<=pageCount;i++) {
+      doc.setPage(i);
+      doc.setFillColor(...NAVY);
+      doc.rect(0, 289, W, 8, 'F');
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...LIGHT);
+      doc.text('Nexialog Consulting · Pipeline Doc + DQ Analyzer · Confidentiel', margin, 294);
+      doc.text('Page '+i+'/'+pageCount, W-margin, 294, {align:'right'});
+    }
+  });
+
+  doc.save('rapport_dq_nexialog.pdf');
+}
+
 function renderDQData() {
   const tables = Object.entries(dqResults);
   if (!tables.length) return '<div class="notice notice-amber">Aucune table profilée. Importez des fichiers et lancez l\'analyse.</div>';
@@ -1662,7 +1882,14 @@ function renderDQData() {
   const scoreColor = v => v>=90?'var(--green)':v>=70?'var(--amber)':'var(--red)';
   const riskColors = {low:'var(--green)',medium:'var(--amber)',high:'var(--red)',critical:'var(--red)'};
 
-  let html = '';
+  let html = `<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px">
+    <button class="btn btn-ghost" onclick="exportExcel()" title="Exporter en Excel">
+      <span style="font-size:12px">⬇</span> Excel
+    </button>
+    <button class="btn btn-primary" onclick="exportPDF()" title="Exporter en PDF">
+      <span style="font-size:12px">⬇</span> PDF
+    </button>
+  </div>`;
 
   // Global summary
   if (tables.length > 1) {
