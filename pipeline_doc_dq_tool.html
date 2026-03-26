@@ -701,7 +701,7 @@ async function analyseCode() {
     const fetchPromise = fetch('https://api.anthropic.com/v1/messages', {
       method:'POST', headers:buildHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-5-20251001', max_tokens:16000,
+        model:'claude-sonnet-4-6', max_tokens:16000,
         system:`Tu es expert en modélisation de risque de crédit. Analyse du code ${lang} et retourne UNIQUEMENT du JSON valide, sans markdown.`,
         messages:[{role:'user', content:`Analyse ce code ${lang} et retourne un JSON structuré.
 Projet: ${document.getElementById('proj-name').value||'PIPELINE'} | Auteur: ${document.getElementById('proj-author').value||''}
@@ -1425,7 +1425,7 @@ async function runAIInsights() {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST', headers:buildHeaders(),
     body:JSON.stringify({
-      model:'claude-sonnet-4-5-20251001', max_tokens:3000,
+      model:'claude-sonnet-4-6', max_tokens:3000,
       system:'Tu es expert en Data Quality pour la modélisation de risque de crédit. Réponds uniquement en JSON valide, sans markdown.',
       messages:[{role:'user',content:`Analyse ces résultats DQ de tables destinées à la modélisation de risque de crédit.
 Retourne un JSON avec:
