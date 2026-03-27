@@ -588,13 +588,7 @@ function setMode(m) {
     document.getElementById('mode-'+id)?.classList.toggle('on', id===m);
     document.getElementById('sec-'+id)?.classList.toggle('hidden', id!==m);
   });
-  // En mode compare, on cache l'écran d'accueil du panneau droit
-  const rpContent = document.getElementById('rp-content');
-  if (m === 'compare') {
-    rpContent.style.visibility = 'hidden';
-  } else {
-    rpContent.style.visibility = '';
-  }
+
 }
 
 function setLang(el) {
@@ -616,7 +610,7 @@ function buildTabs() {
     tabs.push({id:'dict',label:'Dictionnaire',cls:''});
     tabs.push({id:'raw',label:'JSON',cls:''});
   }
-  if (dqResults['__compare__']) {
+  if (compareResult) {
     tabs.push({id:'compare-result',label:'⇄ Comparaison',cls:'green'});
   }
   if (Object.keys(dqResults).filter(k=>k!=='__compare__').length) {
@@ -913,7 +907,7 @@ function parseFile(file) {
           }).filter(v => v !== '');
 
           if (a.type === 'NUMERIC') {
-            const nums = vals.map(v => parseFloat(v.replace(/,/g,'.'))).filter(v => !isNaN(v));
+            const nums = vals.map(v => parseFloat(String(v).trim().replace(/\s/g,'').replace(/^(-?[\d]+),([\d]{1,2})$/,'$1.$2').replace(/,/g,''))).filter(v => !isNaN(v));
             if (nums.length) {
               nums.sort((x,y) => x-y);
               a.numMin = nums[0]; a.numMax = nums[nums.length-1];
@@ -1204,7 +1198,7 @@ function profileColumn(rows, header, total, totalRows){
   let issues=[];
 
   if(type==='NUMERIC'){
-    const nums=strVals.map(v=>parseFloat(v.replace(/,/g,'.'))).filter(v=>!isNaN(v));
+    const nums=strVals.map(v=>parseFloat(String(v).trim().replace(/\s/g,'').replace(/^(-?[\d]+),([\d]{1,2})$/,'$1.$2').replace(/,/g,''))).filter(v=>!isNaN(v));
     validity=strVals.length?(nums.length/strVals.length)*100:100;
     if(nums.length){
       nums.sort((a,b)=>a-b);
@@ -1657,7 +1651,7 @@ function getCurrentDQTable() {
 }
 
 function exportExcel() {
-  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  const names = Object.keys(dqResults);
   if (!names.length) return;
 
   const wb = XLSX.utils.book_new();
@@ -1696,7 +1690,7 @@ function exportExcel() {
 }
 
 function exportPDF() {
-  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  const names = Object.keys(dqResults);
   if (!names.length) return;
 
   const { jsPDF } = window.jspdf;
@@ -1876,7 +1870,7 @@ function exportPDF() {
 }
 
 function renderDQData() {
-  const tables = Object.entries(dqResults);
+  const tables = Object.entries(dqResults).filter(([k]) => k !== '__compare__');
   if (!tables.length) return '<div class="notice notice-amber">Aucune table profilée. Importez des fichiers et lancez l\'analyse.</div>';
 
   const scoreColor = v => v>=90?'var(--green)':v>=70?'var(--amber)':'var(--red)';
@@ -1967,7 +1961,7 @@ function miniGauge(v, color='var(--acc)') {
 }
 
 function renderIssues() {
-  const tables = Object.entries(dqResults);
+  const tables = Object.entries(dqResults).filter(([k]) => k !== '__compare__');
   if (!tables.length) return '<div class="notice notice-amber">Aucune donnée profilée.</div>';
 
   const sevOrder = {critical:0,high:1,medium:2,low:3};
@@ -2415,6 +2409,7 @@ function showMermaidStep(tableId) {
 // ─── COMPARISON MODE ───────────────────────────────
 // ═══════════════════════════════════════════════════
 let cmpData = { a: null, b: null };
+let compareResult = null;
 
 function loadCompareFile(side, file) {
   if (!file) return;
@@ -2457,7 +2452,7 @@ function runComparison() {
     result.labelB = labelB;
 
     // Store in dqResults under special key and show in right panel
-    dqResults['__compare__'] = result;
+    compareResult = result;
     buildTabs();
     setTab('compare-result', null);
     showStatus('cmp', `✓ Comparaison terminée — ${result.common.length} colonnes communes`);
@@ -2488,8 +2483,8 @@ function compareDatasets(dsA, dsB) {
     const goneFromA = [...setA].filter(v => !setB.has(v));
 
     // Distribution shift for numerics
-    const numsA = valsA.map(v=>parseFloat(v.replace(/,/g,'.'))).filter(v=>!isNaN(v));
-    const numsB = valsB.map(v=>parseFloat(v.replace(/,/g,'.'))).filter(v=>!isNaN(v));
+    const numsA = valsA.map(v=>parseFloat(String(v).trim().replace(/\s/g,'').replace(/^(-?[\d]+),([\d]{1,2})$/,'$1.$2').replace(/,/g,''))).filter(v=>!isNaN(v));
+    const numsB = valsB.map(v=>parseFloat(String(v).trim().replace(/\s/g,'').replace(/^(-?[\d]+),([\d]{1,2})$/,'$1.$2').replace(/,/g,''))).filter(v=>!isNaN(v));
     let distShift = null;
     if (numsA.length > 10 && numsB.length > 10) {
       const meanA = numsA.reduce((s,v)=>s+v,0)/numsA.length;
@@ -2516,7 +2511,7 @@ function compareDatasets(dsA, dsB) {
 }
 
 function renderCompareResult() {
-  const r = dqResults['__compare__'];
+  const r = compareResult;
   if (!r) return '<div class="notice notice-amber">Aucune comparaison disponible.</div>';
 
   const scoreColor = v => v>=90?'var(--green)':v>=70?'var(--amber)':'var(--red)';
