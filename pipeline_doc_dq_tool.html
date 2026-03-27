@@ -1416,7 +1416,7 @@ async function runAIInsights() {
     topIssues: dq.issues.filter(i=>['critical','high'].includes(i.sev)).slice(0,5)
   }));
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const resp = await fetch(getApiUrl(), {
     method:'POST', headers:buildHeaders(),
     body:JSON.stringify({
       model:'claude-sonnet-4-6', max_tokens:3000,
@@ -2117,7 +2117,21 @@ function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 // ═══════════════════════════════════════════════════
 // ─── API KEY MANAGEMENT ───────────────────────────
 // ═══════════════════════════════════════════════════
+// ── MODE PROXY OU DIRECT ──
+// Si PROXY_URL est défini, l'outil passe par le backend (mode client banque).
+// Sinon, appel direct Anthropic avec clé front (mode interne Nexialog).
+const PROXY_URL = null; // Remplacer par 'http://localhost:8000' en mode client
+
+function getApiUrl() {
+  return PROXY_URL ? PROXY_URL + '/api/analyse' : 'https://api.anthropic.com/v1/messages';
+}
+
 function buildHeaders() {
+  if (PROXY_URL) {
+    // Mode proxy : pas de clé dans les headers, c'est le serveur qui gère
+    return { 'Content-Type': 'application/json' };
+  }
+  // Mode direct : clé en front (usage interne uniquement)
   const key = localStorage.getItem('nxl_key') || '';
   const h = { 'Content-Type': 'application/json' };
   if (key) {
