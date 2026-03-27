@@ -1002,7 +1002,7 @@ function parseFile(file) {
 
         dqResults[name] = {
           overallScore, completeness:completenessAvg, uniqueness:uniquenessAvg, validity:validityAvg,
-          rowCount:totalRows, colCount:headers.length, columns:colProfiles, issues:allIssues,
+          rowCount:totalRows, sampled, sampleSize:sampleN, colCount:headers.length, columns:colProfiles, issues:allIssues,
           sampled:true, sampleSize:reservoirRows.length, streaming:true
         };
 
@@ -1116,12 +1116,27 @@ function storeTable(name, rows, headers) {
   renderTableList();
   document.getElementById('btn-dq').disabled = false;
   // Auto-profil immédiat pour comportement uniforme CSV/Excel
-  dqResults[name] = profileTable(dbTables[name]);
-  renderTableList(); // mise à jour score
-  buildTabs();
-  if (activeTab === 'welcome' || activeTab === 'dq-data') {
-    setTab('dq-data', null);
-  }
+  // On lance runFullDQ de façon ciblée sur cette table
+  setTimeout(() => {
+    const t = dbTables[name];
+    if (!t) return;
+    // rowCount = volume réel du fichier (préservé même si rows = réservoir)
+    // rows peut être un réservoir de 50k lignes pour les gros CSV
+    const totalRows = t.rowCount;
+    const sampleN = Math.min(t.rows.length, 50000);
+    const sampled = sampleN < totalRows;
+    const sampleRows = t.rows.slice(0, sampleN);
+    const colProfiles = t.headers.map(h => profileColumn(sampleRows, h, sampleN, totalRows));
+    const allIssues = colProfiles.flatMap(c => c.issues);
+    const completenessAvg = colProfiles.reduce((s,c)=>s+c.completeness,0)/colProfiles.length;
+    const uniquenessAvg   = colProfiles.reduce((s,c)=>s+c.uniqueness,0)/colProfiles.length;
+    const validityAvg     = colProfiles.reduce((s,c)=>s+c.validity,0)/colProfiles.length;
+    const overallScore    = completenessAvg*0.5 + validityAvg*0.5;
+    dqResults[name] = { overallScore, completeness:completenessAvg, uniqueness:uniquenessAvg, validity:validityAvg, rowCount:totalRows, colCount:t.headers.length, columns:colProfiles, issues:allIssues, sampled: sampleN < totalRows, sampleSize:sampleN };
+    renderTableList();
+    buildTabs();
+    if (activeTab === 'welcome' || !codeData) setTab('dq-data', null);
+  }, 50);
 }
 
 function removeTable(name) {
@@ -1497,7 +1512,7 @@ function renderPipeline() {
       const x=sx+i*(NW+HG);
       window._npos[t.id]={x,y,w:NW,h:NH};
       nodesHtml+=`<div class="pnode ${t.type}${selCodeNode===t.id?' sel':''}" id="pn-${t.id}" style="left:${x}px;top:${y}px;width:${NW}px;height:${NH}px" onclick="selNode('${t.id}')">
-        <div class="pn-name">${t.id}</div><div class="pn-sub">${esc(t.short||''}</div>
+        <div class="pn-name">${t.id}</div><div class="pn-sub">${esc(t.short||'')}</div>
         <div class="pn-rows">${(t.sources||[]).length?'← '+(t.sources||[]).join(', '):'Table source'}</div>
       </div>`;
     });
@@ -1558,13 +1573,13 @@ function renderNodeDetail(t) {
       ${t.dq?`<div class="nd-tab" onclick="switchNdTab(this,'nq')">Qualité</div>`:''}
     </div>
     <div class="nd-pane on" id="nc">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:12px;padding:8px 10px;background:var(--bg2);border-radius:5px;line-height:1.6">${esc(t.desc||'—'}</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:12px;padding:8px 10px;background:var(--bg2);border-radius:5px;line-height:1.6">${esc(t.desc||'—')}</div>
       ${t.sources?.length?`<div class="slbl">Sources</div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">${t.sources.map(s=>`<span class="chip">▷ ${s}</span>`).join('')}</div>`:''}
       ${t.filters?.length?`<div class="slbl">Filtres</div>${t.filters.map(f=>`<div class="flt-block"><span class="flt-kw">WHERE</span><span>${esc(f)}</span></div>`).join('')}`:`<div class="notice notice-blue" style="font-size:10.5px">Table source — aucun filtre appliqué.</div>`}
-      ${t.added_columns?.length?`<div class="slbl" style="margin-top:12px">Variables construites (${t.added_columns.length})</div>${t.added_columns.map(c=>`<div class="add-block"><div class="add-name">${esc(c.name)}</div><div><div style="font-size:11px;color:var(--text1)">${esc(c.desc}</div><div class="add-code">${esc(c.logic)}</div></div></div>`).join('')}`:``}
+      ${t.added_columns?.length?`<div class="slbl" style="margin-top:12px">Variables construites (${t.added_columns.length})</div>${t.added_columns.map(c=>`<div class="add-block"><div class="add-name">${esc(c.name)}</div><div><div style="font-size:11px;color:var(--text1)">${esc(c.desc)}</div><div class="add-code">${esc(c.logic)}</div></div></div>`).join('')}`:``}
     </div>
     <div class="nd-pane" id="nd">
-      ${(t.columns||[]).length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Champ</th><th>Type</th><th>Null</th><th>Description</th><th>Source</th></tr></thead><tbody>${(t.columns||[]).map((c,i)=>`<tr><td><button class="col-btn" onclick="showCodeCol('${t.id}',${i})">${esc(c.name)}</button></td><td><span class="type-badge">${c.type||'?'}</span></td><td><span style="font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:${c.nullable?'rgba(240,160,48,.1)':'rgba(52,210,122,.08)'};color:${c.nullable?'var(--amber)':'var(--green)'}">${c.nullable?'OUI':'NON'}</span></td><td style="font-size:11px;color:var(--text2)">${esc(c.desc||'—'}</td><td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.src_table?c.src_table+(c.src_field?'.'+c.src_field:''):'—'}</td></tr>`).join('')}</tbody></table></div>`:`<div style="color:var(--text3);font-size:11px;text-align:center;padding:16px">Aucune colonne renseignée</div>`}
+      ${(t.columns||[]).length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Champ</th><th>Type</th><th>Null</th><th>Description</th><th>Source</th></tr></thead><tbody>${(t.columns||[]).map((c,i)=>`<tr><td><button class="col-btn" onclick="showCodeCol('${t.id}',${i})">${esc(c.name)}</button></td><td><span class="type-badge">${c.type||'?'}</span></td><td><span style="font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:${c.nullable?'rgba(240,160,48,.1)':'rgba(52,210,122,.08)'};color:${c.nullable?'var(--amber)':'var(--green)'}">${c.nullable?'OUI':'NON'}</span></td><td style="font-size:11px;color:var(--text2)">${esc(c.desc||'—')}</td><td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.src_table?c.src_table+(c.src_field?'.'+c.src_field:''):'—'}</td></tr>`).join('')}</tbody></table></div>`:`<div style="color:var(--text3);font-size:11px;text-align:center;padding:16px">Aucune colonne renseignée</div>`}
     </div>
     ${t.dq?`<div class="nd-pane" id="nq">${renderDQPanelCode(t.dq)}</div>`:''}
   </div>`;
@@ -1587,7 +1602,7 @@ function showCodeCol(tid, ci) {
   document.getElementById('col-table-name').textContent=tid;
   document.getElementById('col-modal-name').textContent=c.name;
   document.getElementById('col-modal-type').textContent=`${c.type||'?'} · ${c.nullable?'Nullable':'Non nullable'}`;
-  let html=`<div class="slbl">Description</div><div style="font-size:12px;color:var(--text1);margin-bottom:14px;line-height:1.6">${esc(c.desc||'—'}</div>`;
+  let html=`<div class="slbl">Description</div><div style="font-size:12px;color:var(--text1);margin-bottom:14px;line-height:1.6">${esc(c.desc||'—')}</div>`;
   html+=`<div class="slbl">Data Lineage</div>`;
   if(c.src_table){html+=lineageStep(c.src_table+(c.src_field?'.'+c.src_field:''),'Origine',c.src_table,'#4e5e7e');}
   if(c.tx_type&&c.tx_type!=='direct'){html+=`<div style="text-align:center;color:var(--text3);font-size:12px;margin:4px 0">↓</div>`;html+=lineageStep(txLbls[c.tx_type]||c.tx_type,'Transformation','var(--amber)','var(--amber)',c.tx_detail);}
@@ -1613,7 +1628,7 @@ function renderDQCode() {
   const tables = codeData.tables.filter(t=>t.dq);
   if (!tables.length) return `<div class="notice notice-amber">Aucune DQ disponible. Relancez avec l'option DQ cochée.</div>`;
   return tables.map(t=>`<div class="panel fu" style="margin-bottom:14px">
-    <div class="panel-hdr"><div class="panel-title" style="color:${{source:'var(--cyan)',intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text1)'}">${t.id}</div><div style="font-size:10px;color:var(--text2)">${esc(t.short||''}</div></div>
+    <div class="panel-hdr"><div class="panel-title" style="color:${{source:'var(--cyan)',intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text1)'}">${t.id}</div><div style="font-size:10px;color:var(--text2)">${esc(t.short||'')}</div></div>
     <div class="panel-body">${renderDQPanelCode(t.dq)}</div>
   </div>`).join('');
 }
@@ -1636,7 +1651,7 @@ function renderDict() {
   return created.map(t=>`<div class="panel fu" style="margin-bottom:14px">
     <div class="panel-hdr">
       <div class="panel-title" style="color:${{intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text1)'}">${t.id}</div>
-      <div style="font-size:10px;color:var(--text2)">${(t.columns||[]).length} colonnes · ${esc(t.short||''}</div>
+      <div style="font-size:10px;color:var(--text2)">${(t.columns||[]).length} colonnes · ${esc(t.short||'')}</div>
     </div>
     <div style="overflow-x:auto">
       <table class="tbl"><thead><tr><th>Champ</th><th>Type</th><th>Null</th><th>Description</th><th>Source</th><th>Transformation</th></tr></thead>
@@ -1644,7 +1659,7 @@ function renderDict() {
         <td><button class="col-btn" onclick="showCodeCol('${t.id}',${i})">${esc(c.name)}</button></td>
         <td><span class="type-badge">${c.type||'?'}</span></td>
         <td><span style="font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:${c.nullable?'rgba(240,160,48,.1)':'rgba(52,210,122,.08)'};color:${c.nullable?'var(--amber)':'var(--green)'}">${c.nullable?'OUI':'NON'}</span></td>
-        <td style="font-size:11px;color:var(--text2)">${esc(c.desc||'—'}</td>
+        <td style="font-size:11px;color:var(--text2)">${esc(c.desc||'—')}</td>
         <td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.src_table?c.src_table+(c.src_field?'.'+c.src_field:''):'—'}</td>
         <td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.tx_detail||({direct:'Reprise directe',const:'Constante'}[c.tx_type]||c.tx_type||'—')}</td>
       </tr>`).join('')}</tbody></table>
@@ -2382,7 +2397,7 @@ function showMermaidStep(tableId) {
   if (t.desc) {
     html += `<div class="mmaid-block" style="border-left:2px solid ${tc};border-radius:0 6px 6px 0">
       <div class="mmaid-block-lbl">Description</div>
-      <div style="color:var(--text1)">${esc(t.desc}</div>
+      <div style="color:var(--text1)">${esc(t.desc)}</div>
     </div>`;
   }
 
@@ -2408,7 +2423,7 @@ function showMermaidStep(tableId) {
       ${t.added_columns.map(c => `
         <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--acc);margin-bottom:3px">${esc(c.name)}</div>
-          <div style="font-size:10.5px;color:var(--text2);margin-bottom:3px">${esc(c.desc||''}</div>
+          <div style="font-size:10.5px;color:var(--text2);margin-bottom:3px">${esc(c.desc||'')}</div>
           ${c.logic ? `<div style="font-family:var(--mono);font-size:10px;color:var(--text2);background:var(--bg0);padding:4px 7px;border-radius:3px;line-height:1.5">${esc(c.logic)}</div>` : ''}
         </div>`).join('')}
     </div>`;
@@ -2432,7 +2447,7 @@ function showMermaidStep(tableId) {
     html += `<div class="mmaid-block">
       <div class="mmaid-block-lbl">Colonnes (${t.columns.length})</div>
       <div style="display:flex;flex-wrap:wrap;margin-top:2px">
-        ${t.columns.map((c,i) => `<span class="mmaid-col-pill" onclick="showCodeCol('${t.id}',${i})" title="${esc(c.desc||''}">${esc(c.name)}</span>`).join('')}
+        ${t.columns.map((c,i) => `<span class="mmaid-col-pill" onclick="showCodeCol('${t.id}',${i})" title="${esc(c.desc||'')}">${esc(c.name)}</span>`).join('')}
       </div>
       <div style="font-size:9px;color:var(--text3);margin-top:6px;font-family:var(--mono)">Cliquez sur un champ pour son data lineage →</div>
     </div>`;
