@@ -629,6 +629,13 @@ function buildTabs() {
 }
 
 function setTab(id, el) {
+  // Réinitialiser le style de rp-content modifié éventuellement par Mermaid
+  const rpc = document.getElementById('rp-content');
+  if (rpc) {
+    rpc.style.padding = '';
+    rpc.style.overflow = '';
+    rpc.style.height = '';
+  }
   activeTab = id;
   document.querySelectorAll('.rp-tab').forEach(t => t.classList.remove('on'));
   if (el) el.classList.add('on'); else document.querySelector(`[data-tab="${id}"]`)?.classList.add('on');
@@ -869,10 +876,12 @@ function parseFile(file) {
                 if (a.distinctSet.size > 100000) a.distinctCapped = true;
               }
               // Top-freq map (cap at 1000 keys)
-              if (a.topFreqSize < 1000) {
-                a.topFreq[v] = (a.topFreq[v] || 0) + 1;
-                if (!Object.prototype.hasOwnProperty.call(a.topFreq, v)) a.topFreqSize++;
-              } else if (a.topFreq[v]) {
+              if (!Object.prototype.hasOwnProperty.call(a.topFreq, v)) {
+                if (a.topFreqSize < 1000) {
+                  a.topFreq[v] = 1;
+                  a.topFreqSize++;
+                }
+              } else {
                 a.topFreq[v]++;
               }
             }
@@ -989,7 +998,7 @@ function parseFile(file) {
         const completenessAvg = colProfiles.reduce((s,c)=>s+c.completeness,0)/colProfiles.length;
         const uniquenessAvg   = colProfiles.reduce((s,c)=>s+c.uniqueness,0)/colProfiles.length;
         const validityAvg     = colProfiles.reduce((s,c)=>s+c.validity,0)/colProfiles.length;
-        const overallScore    = completenessAvg*0.4 + validityAvg*0.35 + uniquenessAvg*0.25;
+        const overallScore    = completenessAvg*0.5 + validityAvg*0.5; // Unicité exclue du score global (biais catégoriel)
 
         dqResults[name] = {
           overallScore, completeness:completenessAvg, uniqueness:uniquenessAvg, validity:validityAvg,
@@ -1005,7 +1014,7 @@ function parseFile(file) {
         document.getElementById('btn-dq').disabled = false;
         buildTabs();
         setTab('dq-data', null);
-        showStatus('dq', `✓ ${name} profilé — ${totalRows.toLocaleString()} lignes (réservoir: ${reservoirRows.length.toLocaleString()})`);
+        showStatus('dq', `✓ ${esc(name)} profilé — ${totalRows.toLocaleString()} lignes (réservoir: ${reservoirRows.length.toLocaleString()})`);
 
         // Free accumulators
         acc = []; reservoirRows = [];
@@ -1078,7 +1087,7 @@ function showParsingStatus(name, msg) {
   div.className = 'tl-item';
   div.id = 'parsing-' + name;
   div.style.borderLeftColor = 'var(--amber)';
-  div.innerHTML = `<div class="tl-name">${name}</div>
+  div.innerHTML = `<div class="tl-name">${esc(name)}</div>
     <div class="tl-meta"><span style="color:var(--amber)">${msg}</span></div>`;
   // Remove placeholder if first table
   if (el.querySelector('div[style*="text-align:center"]')) el.innerHTML = '';
@@ -1096,7 +1105,7 @@ function showParsingError(name, msg) {
   const div = document.createElement('div');
   div.className = 'tl-item';
   div.style.borderLeftColor = 'var(--red)';
-  div.innerHTML = `<div class="tl-name" style="color:var(--red)">${name}</div>
+  div.innerHTML = `<div class="tl-name" style="color:var(--red)">${esc(name)}</div>
     <div class="tl-meta"><span style="color:var(--red)">⚠ ${msg}</span></div>`;
   el.appendChild(div);
   setTimeout(() => div.remove(), 6000);
@@ -1106,6 +1115,13 @@ function storeTable(name, rows, headers) {
   dbTables[name] = { rows, headers, rowCount: rows.length };
   renderTableList();
   document.getElementById('btn-dq').disabled = false;
+  // Auto-profil immédiat pour comportement uniforme CSV/Excel
+  dqResults[name] = profileTable(dbTables[name]);
+  renderTableList(); // mise à jour score
+  buildTabs();
+  if (activeTab === 'welcome' || activeTab === 'dq-data') {
+    setTab('dq-data', null);
+  }
 }
 
 function removeTable(name) {
@@ -1277,7 +1293,7 @@ self.onmessage = function(e) {
     const completenessAvg = avg(colProfiles.map(c=>c.completeness));
     const uniquenessAvg   = avg(colProfiles.map(c=>c.uniqueness));
     const validityAvg     = avg(colProfiles.map(c=>c.validity));
-    const overallScore    = completenessAvg*0.4 + validityAvg*0.35 + uniquenessAvg*0.25;
+    const overallScore    = completenessAvg*0.5 + validityAvg*0.5; // Unicité exclue du score global (biais catégoriel)
 
     results[name] = { overallScore, completeness:completenessAvg, uniqueness:uniquenessAvg, validity:validityAvg, rowCount:totalRows, colCount:headers.length, columns:colProfiles, issues:allIssues, sampled, sampleSize:sampleN };
   });
@@ -1481,7 +1497,7 @@ function renderPipeline() {
       const x=sx+i*(NW+HG);
       window._npos[t.id]={x,y,w:NW,h:NH};
       nodesHtml+=`<div class="pnode ${t.type}${selCodeNode===t.id?' sel':''}" id="pn-${t.id}" style="left:${x}px;top:${y}px;width:${NW}px;height:${NH}px" onclick="selNode('${t.id}')">
-        <div class="pn-name">${t.id}</div><div class="pn-sub">${t.short||''}</div>
+        <div class="pn-name">${t.id}</div><div class="pn-sub">${esc(t.short||''}</div>
         <div class="pn-rows">${(t.sources||[]).length?'← '+(t.sources||[]).join(', '):'Table source'}</div>
       </div>`;
     });
@@ -1542,13 +1558,13 @@ function renderNodeDetail(t) {
       ${t.dq?`<div class="nd-tab" onclick="switchNdTab(this,'nq')">Qualité</div>`:''}
     </div>
     <div class="nd-pane on" id="nc">
-      <div style="font-size:11px;color:var(--text2);margin-bottom:12px;padding:8px 10px;background:var(--bg2);border-radius:5px;line-height:1.6">${t.desc||'—'}</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:12px;padding:8px 10px;background:var(--bg2);border-radius:5px;line-height:1.6">${esc(t.desc||'—'}</div>
       ${t.sources?.length?`<div class="slbl">Sources</div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">${t.sources.map(s=>`<span class="chip">▷ ${s}</span>`).join('')}</div>`:''}
-      ${t.filters?.length?`<div class="slbl">Filtres</div>${t.filters.map(f=>`<div class="flt-block"><span class="flt-kw">WHERE</span><span>${f}</span></div>`).join('')}`:`<div class="notice notice-blue" style="font-size:10.5px">Table source — aucun filtre appliqué.</div>`}
-      ${t.added_columns?.length?`<div class="slbl" style="margin-top:12px">Variables construites (${t.added_columns.length})</div>${t.added_columns.map(c=>`<div class="add-block"><div class="add-name">${c.name}</div><div><div style="font-size:11px;color:var(--text1)">${c.desc}</div><div class="add-code">${c.logic}</div></div></div>`).join('')}`:``}
+      ${t.filters?.length?`<div class="slbl">Filtres</div>${t.filters.map(f=>`<div class="flt-block"><span class="flt-kw">WHERE</span><span>${esc(f)}</span></div>`).join('')}`:`<div class="notice notice-blue" style="font-size:10.5px">Table source — aucun filtre appliqué.</div>`}
+      ${t.added_columns?.length?`<div class="slbl" style="margin-top:12px">Variables construites (${t.added_columns.length})</div>${t.added_columns.map(c=>`<div class="add-block"><div class="add-name">${esc(c.name)}</div><div><div style="font-size:11px;color:var(--text1)">${esc(c.desc}</div><div class="add-code">${esc(c.logic)}</div></div></div>`).join('')}`:``}
     </div>
     <div class="nd-pane" id="nd">
-      ${(t.columns||[]).length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Champ</th><th>Type</th><th>Null</th><th>Description</th><th>Source</th></tr></thead><tbody>${(t.columns||[]).map((c,i)=>`<tr><td><button class="col-btn" onclick="showCodeCol('${t.id}',${i})">${c.name}</button></td><td><span class="type-badge">${c.type||'?'}</span></td><td><span style="font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:${c.nullable?'rgba(240,160,48,.1)':'rgba(52,210,122,.08)'};color:${c.nullable?'var(--amber)':'var(--green)'}">${c.nullable?'OUI':'NON'}</span></td><td style="font-size:11px;color:var(--text2)">${c.desc||'—'}</td><td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.src_table?c.src_table+(c.src_field?'.'+c.src_field:''):'—'}</td></tr>`).join('')}</tbody></table></div>`:`<div style="color:var(--text3);font-size:11px;text-align:center;padding:16px">Aucune colonne renseignée</div>`}
+      ${(t.columns||[]).length?`<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Champ</th><th>Type</th><th>Null</th><th>Description</th><th>Source</th></tr></thead><tbody>${(t.columns||[]).map((c,i)=>`<tr><td><button class="col-btn" onclick="showCodeCol('${t.id}',${i})">${esc(c.name)}</button></td><td><span class="type-badge">${c.type||'?'}</span></td><td><span style="font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:${c.nullable?'rgba(240,160,48,.1)':'rgba(52,210,122,.08)'};color:${c.nullable?'var(--amber)':'var(--green)'}">${c.nullable?'OUI':'NON'}</span></td><td style="font-size:11px;color:var(--text2)">${esc(c.desc||'—'}</td><td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.src_table?c.src_table+(c.src_field?'.'+c.src_field:''):'—'}</td></tr>`).join('')}</tbody></table></div>`:`<div style="color:var(--text3);font-size:11px;text-align:center;padding:16px">Aucune colonne renseignée</div>`}
     </div>
     ${t.dq?`<div class="nd-pane" id="nq">${renderDQPanelCode(t.dq)}</div>`:''}
   </div>`;
@@ -1571,12 +1587,12 @@ function showCodeCol(tid, ci) {
   document.getElementById('col-table-name').textContent=tid;
   document.getElementById('col-modal-name').textContent=c.name;
   document.getElementById('col-modal-type').textContent=`${c.type||'?'} · ${c.nullable?'Nullable':'Non nullable'}`;
-  let html=`<div class="slbl">Description</div><div style="font-size:12px;color:var(--text1);margin-bottom:14px;line-height:1.6">${c.desc||'—'}</div>`;
+  let html=`<div class="slbl">Description</div><div style="font-size:12px;color:var(--text1);margin-bottom:14px;line-height:1.6">${esc(c.desc||'—'}</div>`;
   html+=`<div class="slbl">Data Lineage</div>`;
   if(c.src_table){html+=lineageStep(c.src_table+(c.src_field?'.'+c.src_field:''),'Origine',c.src_table,'#4e5e7e');}
   if(c.tx_type&&c.tx_type!=='direct'){html+=`<div style="text-align:center;color:var(--text3);font-size:12px;margin:4px 0">↓</div>`;html+=lineageStep(txLbls[c.tx_type]||c.tx_type,'Transformation','var(--amber)','var(--amber)',c.tx_detail);}
   html+=`<div style="text-align:center;color:var(--text3);font-size:12px;margin:4px 0">↓</div>`;
-  html+=lineageStep(`${tid}.${c.name}`,'Destination',({source:'var(--cyan)',intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text2)'));
+  html+=lineageStep(`${tid}.${esc(c.name)}`,'Destination',({source:'var(--cyan)',intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text2)'));
   document.getElementById('col-modal-body').innerHTML=html;
   document.getElementById('col-overlay').classList.add('open');
 }
@@ -1597,7 +1613,7 @@ function renderDQCode() {
   const tables = codeData.tables.filter(t=>t.dq);
   if (!tables.length) return `<div class="notice notice-amber">Aucune DQ disponible. Relancez avec l'option DQ cochée.</div>`;
   return tables.map(t=>`<div class="panel fu" style="margin-bottom:14px">
-    <div class="panel-hdr"><div class="panel-title" style="color:${{source:'var(--cyan)',intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text1)'}">${t.id}</div><div style="font-size:10px;color:var(--text2)">${t.short||''}</div></div>
+    <div class="panel-hdr"><div class="panel-title" style="color:${{source:'var(--cyan)',intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text1)'}">${t.id}</div><div style="font-size:10px;color:var(--text2)">${esc(t.short||''}</div></div>
     <div class="panel-body">${renderDQPanelCode(t.dq)}</div>
   </div>`).join('');
 }
@@ -1620,15 +1636,15 @@ function renderDict() {
   return created.map(t=>`<div class="panel fu" style="margin-bottom:14px">
     <div class="panel-hdr">
       <div class="panel-title" style="color:${{intermediate:'var(--acc)',master:'var(--amber)',final:'var(--green)'}[t.type]||'var(--text1)'}">${t.id}</div>
-      <div style="font-size:10px;color:var(--text2)">${(t.columns||[]).length} colonnes · ${t.short||''}</div>
+      <div style="font-size:10px;color:var(--text2)">${(t.columns||[]).length} colonnes · ${esc(t.short||''}</div>
     </div>
     <div style="overflow-x:auto">
       <table class="tbl"><thead><tr><th>Champ</th><th>Type</th><th>Null</th><th>Description</th><th>Source</th><th>Transformation</th></tr></thead>
       <tbody>${(t.columns||[]).map((c,i)=>`<tr>
-        <td><button class="col-btn" onclick="showCodeCol('${t.id}',${i})">${c.name}</button></td>
+        <td><button class="col-btn" onclick="showCodeCol('${t.id}',${i})">${esc(c.name)}</button></td>
         <td><span class="type-badge">${c.type||'?'}</span></td>
         <td><span style="font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;background:${c.nullable?'rgba(240,160,48,.1)':'rgba(52,210,122,.08)'};color:${c.nullable?'var(--amber)':'var(--green)'}">${c.nullable?'OUI':'NON'}</span></td>
-        <td style="font-size:11px;color:var(--text2)">${c.desc||'—'}</td>
+        <td style="font-size:11px;color:var(--text2)">${esc(c.desc||'—'}</td>
         <td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.src_table?c.src_table+(c.src_field?'.'+c.src_field:''):'—'}</td>
         <td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${c.tx_detail||({direct:'Reprise directe',const:'Constante'}[c.tx_type]||c.tx_type||'—')}</td>
       </tr>`).join('')}</tbody></table>
@@ -1905,10 +1921,10 @@ function renderDQData() {
     const highIssues = dq.issues.filter(i=>i.sev==='high').length;
     html += `<div class="panel fu" style="margin-bottom:14px">
       <div class="panel-hdr">
-        <div class="panel-title" style="color:${scoreColor(score)}">${name} <span style="font-size:18px;margin-left:4px">${score}%</span></div>
+        <div class="panel-title" style="color:${scoreColor(score)}">${esc(name)} <span style="font-size:18px;margin-left:4px">${score}%</span></div>
         <div style="font-size:10px;color:var(--text2);font-family:var(--mono)">${dq.rowCount.toLocaleString()} lignes · ${dq.colCount} colonnes</div>
         ${dq.sampled ? `<span class="sample-badge">⚡ échantillon ${Number(dq.sampleSize).toLocaleString()} lignes</span>` : ''}
-        <button class="btn btn-ghost" style="padding:4px 10px;font-size:9px" onclick="selDBTable='${name}';setTab('profiling',null)">Profil détaillé →</button>
+        <button class="btn btn-ghost" style="padding:4px 10px;font-size:9px" onclick="selDBTable='${esc(name)}';setTab('profiling',null)">Profil détaillé →</button>
       </div>
       <div class="panel-body">
         <div class="dq-cards">
@@ -1918,7 +1934,7 @@ function renderDQData() {
           <div class="dq-card dq-k"><div class="dq-val" style="color:${critIssues+highIssues>0?'var(--red)':'var(--green)'}">${critIssues+highIssues}</div><div class="dq-lbl">Anomalies critiques</div><div class="dq-sub">${critIssues} critique · ${highIssues} élevée</div></div>
         </div>
         ${dq.issues.filter(i=>['critical','high'].includes(i.sev)).slice(0,3).map(i=>issueRow(i)).join('')}
-        ${dq.issues.filter(i=>['critical','high'].includes(i.sev)).length>3?`<div style="font-size:10px;color:var(--text2);margin-top:4px;font-family:var(--mono)">+ ${dq.issues.filter(i=>['critical','high'].includes(i.sev)).length-3} autres anomalies — <span style="color:var(--acc);cursor:pointer" onclick="selDBTable='${name}';setTab('issues',null)">Voir tout</span></div>`:''}
+        ${dq.issues.filter(i=>['critical','high'].includes(i.sev)).length>3?`<div style="font-size:10px;color:var(--text2);margin-top:4px;font-family:var(--mono)">+ ${dq.issues.filter(i=>['critical','high'].includes(i.sev)).length-3} autres anomalies — <span style="color:var(--acc);cursor:pointer" onclick="selDBTable='${esc(name)}';setTab('issues',null)">Voir tout</span></div>`:''}
       </div>
     </div>`;
   });
@@ -1937,11 +1953,12 @@ function renderProfiling() {
     html += `<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">${tableNames.map(n=>`<button class="btn ${n===name?'btn-primary':'btn-ghost'}" onclick="selDBTable='${n}';renderContent()">${n}</button>`).join('')}</div>`;
   }
 
-  html += `<div class="panel fu"><div class="panel-hdr"><div class="panel-title">${name} — Profil par colonne</div><div style="font-size:10px;color:var(--text2);font-family:var(--mono)">${dq.rowCount.toLocaleString()} lignes · ${dq.colCount} colonnes</div></div>
+  const isSampled = dq.rowCount !== dbTables[name]?.rowCount && dbTables[name]?.rowCount > dq.rowCount;
+  html += `<div class="panel fu"><div class="panel-hdr"><div class="panel-title">${esc(name)} — Profil par colonne</div><div style="font-size:10px;color:var(--text2);font-family:var(--mono)">${dq.rowCount.toLocaleString()} lignes · ${dq.colCount} colonnes${isSampled ? ' · <span style="color:var(--amber)">échantillon</span>' : ''}</div></div>
     <div style="overflow-x:auto"><table class="tbl">
       <thead><tr><th>Colonne</th><th>Type inféré</th><th>Complétude</th><th>Unicité</th><th>Validité</th><th>Valeurs nulles</th><th>Distincts</th><th>Anomalies</th></tr></thead>
       <tbody>${dq.columns.map((c,i)=>`<tr>
-        <td><button class="col-btn" onclick="showDBCol('${name}',${i})">${c.name}</button></td>
+        <td><button class="col-btn" onclick="showDBCol('${esc(name)}',${i})">${esc(c.name)}</button></td>
         <td><span class="type-badge type-${c.type.toLowerCase()}">${c.type}</span></td>
         <td>${miniGauge(c.completeness)}</td>
         <td>${miniGauge(c.uniqueness,'var(--green)')}</td>
@@ -1984,8 +2001,8 @@ function renderIssues() {
     html+=`<div class="slbl">${label} (${arr.length})</div>`;
     html+=arr.map(i=>`<div class="issue-row"><div class="issue-dot" style="background:${{critical:'var(--red)',high:'var(--amber)',medium:'var(--acc)',low:'var(--green)'}[i.sev]}"></div>
       <div class="issue-body">
-        <div class="issue-field">${i.table} · ${i.field}</div>
-        <div class="issue-msg">${i.msg}</div>
+        <div class="issue-field">${esc(i.table)} · ${esc(i.field)}</div>
+        <div class="issue-msg">${esc(i.msg)}</div>
       </div>
       <span class="sev-pill sev-${i.sev}">${{critical:'Critique',high:'Élevée',medium:'Moyenne',low:'Faible'}[i.sev]}</span>
     </div>`).join('');
@@ -2021,12 +2038,12 @@ function renderAI() {
 
   if (ai.positives?.length) {
     html += `<div class="slbl" style="color:var(--green)">Points positifs</div>`;
-    html += ai.positives.map(p=>`<div style="display:flex;gap:8px;padding:7px 10px;background:rgba(52,210,122,.05);border-radius:5px;border-left:2px solid var(--green);margin-bottom:4px;font-size:11px;color:var(--text1)"><span style="color:var(--green)">✓</span>${p}</div>`).join('');
+    html += ai.positives.map(p=>`<div style="display:flex;gap:8px;padding:7px 10px;background:rgba(52,210,122,.05);border-radius:5px;border-left:2px solid var(--green);margin-bottom:4px;font-size:11px;color:var(--text1)"><span style="color:var(--green)">✓</span>${esc(p)}</div>`).join('');
   }
 
   if (ai.watchPoints?.length) {
     html += `<div class="slbl">Points de vigilance</div>`;
-    html += ai.watchPoints.map(p=>`<div style="display:flex;gap:8px;padding:7px 10px;background:rgba(240,160,48,.05);border-radius:5px;border-left:2px solid var(--amber);margin-bottom:4px;font-size:11px;color:var(--text1)"><span style="color:var(--amber)">⚡</span>${p}</div>`).join('');
+    html += ai.watchPoints.map(p=>`<div style="display:flex;gap:8px;padding:7px 10px;background:rgba(240,160,48,.05);border-radius:5px;border-left:2px solid var(--amber);margin-bottom:4px;font-size:11px;color:var(--text1)"><span style="color:var(--amber)">⚡</span>${esc(p)}</div>`).join('');
   }
   return html;
 }
@@ -2094,7 +2111,7 @@ function issueRow(i) {
   const dc={critical:'var(--red)',high:'var(--amber)',medium:'var(--acc)',low:'var(--green)'};
   const sl={critical:'Critique',high:'Élevée',medium:'Moyenne',low:'Faible'};
   return `<div class="issue-row"><div class="issue-dot" style="background:${dc[i.sev]||'var(--text2)'}"></div>
-    <div class="issue-body"><div class="issue-field">${i.field||''}</div><div class="issue-msg">${i.msg}</div></div>
+    <div class="issue-body"><div class="issue-field">${i.field||''}</div><div class="issue-msg">${esc(i.msg)}</div></div>
     <span class="sev-pill sev-${i.sev||'low'}">${sl[i.sev]||i.sev}</span>
   </div>`;
 }
@@ -2112,7 +2129,15 @@ function setBtnLoad(btnId, spinId, lblId, lbl, loading=true) {
   document.getElementById(lblId).textContent=lbl;
 }
 
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
 
 // ═══════════════════════════════════════════════════
 // ─── API KEY MANAGEMENT ───────────────────────────
@@ -2309,7 +2334,7 @@ function buildMermaidDef() {
     const t2 = sanitize(to);
     const target = codeData.tables.find(t => t.id === to);
     const isJoin = (target?.sources || []).length > 1;
-    lines.push(`  ${f} ${isJoin ? '-- JOIN -->' : '-->'} ${t2}`);
+    lines.push(`  ${esc(f)} ${isJoin ? '-- JOIN -->' : '-->'} ${t2}`);
   });
 
   lines.push('');
@@ -2357,7 +2382,7 @@ function showMermaidStep(tableId) {
   if (t.desc) {
     html += `<div class="mmaid-block" style="border-left:2px solid ${tc};border-radius:0 6px 6px 0">
       <div class="mmaid-block-lbl">Description</div>
-      <div style="color:var(--text1)">${t.desc}</div>
+      <div style="color:var(--text1)">${esc(t.desc}</div>
     </div>`;
   }
 
@@ -2372,7 +2397,7 @@ function showMermaidStep(tableId) {
   if (t.filters?.length) {
     html += `<div class="mmaid-block">
       <div class="mmaid-block-lbl">Filtres appliqués</div>
-      ${t.filters.map(f => `<div class="mmaid-flt"><span>WHERE</span>${f}</div>`).join('')}
+      ${t.filters.map(f => `<div class="mmaid-flt"><span>WHERE</span>${esc(f)}</div>`).join('')}
     </div>`;
   }
 
@@ -2382,9 +2407,9 @@ function showMermaidStep(tableId) {
       <div class="mmaid-block-lbl">Variables construites</div>
       ${t.added_columns.map(c => `
         <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-          <div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--acc);margin-bottom:3px">${c.name}</div>
-          <div style="font-size:10.5px;color:var(--text2);margin-bottom:3px">${c.desc||''}</div>
-          ${c.logic ? `<div style="font-family:var(--mono);font-size:10px;color:var(--text2);background:var(--bg0);padding:4px 7px;border-radius:3px;line-height:1.5">${c.logic}</div>` : ''}
+          <div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--acc);margin-bottom:3px">${esc(c.name)}</div>
+          <div style="font-size:10.5px;color:var(--text2);margin-bottom:3px">${esc(c.desc||''}</div>
+          ${c.logic ? `<div style="font-family:var(--mono);font-size:10px;color:var(--text2);background:var(--bg0);padding:4px 7px;border-radius:3px;line-height:1.5">${esc(c.logic)}</div>` : ''}
         </div>`).join('')}
     </div>`;
   }
@@ -2407,7 +2432,7 @@ function showMermaidStep(tableId) {
     html += `<div class="mmaid-block">
       <div class="mmaid-block-lbl">Colonnes (${t.columns.length})</div>
       <div style="display:flex;flex-wrap:wrap;margin-top:2px">
-        ${t.columns.map((c,i) => `<span class="mmaid-col-pill" onclick="showCodeCol('${t.id}',${i})" title="${c.desc||''}">${c.name}</span>`).join('')}
+        ${t.columns.map((c,i) => `<span class="mmaid-col-pill" onclick="showCodeCol('${t.id}',${i})" title="${esc(c.desc||''}">${esc(c.name)}</span>`).join('')}
       </div>
       <div style="font-size:9px;color:var(--text3);margin-top:6px;font-family:var(--mono)">Cliquez sur un champ pour son data lineage →</div>
     </div>`;
@@ -2537,7 +2562,7 @@ function renderCompareResult() {
   // Header summary
   html += `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center;margin-bottom:20px">
     <div style="background:var(--bg1);border:1px solid var(--border);border-top:3px solid var(--nxl-teal);border-radius:3px;padding:14px 16px">
-      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--nxl-teal);margin-bottom:8px">${r.labelA}</div>
+      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--nxl-teal);margin-bottom:8px">${esc(r.labelA)}</div>
       <div style="font-family:var(--mono);font-size:22px;font-weight:700">${r.rowsA.toLocaleString()}</div>
       <div style="font-size:10px;color:var(--text2);margin-top:2px">${r.colsA} colonnes</div>
     </div>
@@ -2547,7 +2572,7 @@ function renderCompareResult() {
       <div style="font-family:var(--mono);font-size:10px;color:var(--text2)">${rowPct>=0?'+':''}${rowPct}%</div>
     </div>
     <div style="background:var(--bg1);border:1px solid var(--border);border-top:3px solid var(--amber);border-radius:3px;padding:14px 16px">
-      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:8px">${r.labelB}</div>
+      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:8px">${esc(r.labelB)}</div>
       <div style="font-family:var(--mono);font-size:22px;font-weight:700">${r.rowsB.toLocaleString()}</div>
       <div style="font-size:10px;color:var(--text2);margin-top:2px">${r.colsB} colonnes</div>
     </div>
@@ -2561,8 +2586,8 @@ function renderCompareResult() {
         <div style="font-size:11px;color:var(--text1)">
           <span style="font-family:var(--mono);font-size:10px;color:var(--nxl-teal)">${r.common.length}</span> colonnes communes
         </div>
-        ${r.onlyA.length ? `<div style="font-size:11px;color:var(--red)"><span style="font-family:var(--mono);font-size:10px">${r.onlyA.length}</span> uniquement dans ${r.labelA} : <span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${r.onlyA.slice(0,5).join(', ')}${r.onlyA.length>5?'…':''}</span></div>` : ''}
-        ${r.onlyB.length ? `<div style="font-size:11px;color:var(--amber)"><span style="font-family:var(--mono);font-size:10px">${r.onlyB.length}</span> uniquement dans ${r.labelB} : <span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${r.onlyB.slice(0,5).join(', ')}${r.onlyB.length>5?'…':''}</span></div>` : ''}
+        ${r.onlyA.length ? `<div style="font-size:11px;color:var(--red)"><span style="font-family:var(--mono);font-size:10px">${r.onlyA.length}</span> uniquement dans ${esc(r.labelA)} : <span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${r.onlyA.slice(0,5).join(', ')}${r.onlyA.length>5?'…':''}</span></div>` : ''}
+        ${r.onlyB.length ? `<div style="font-size:11px;color:var(--amber)"><span style="font-family:var(--mono);font-size:10px">${r.onlyB.length}</span> uniquement dans ${esc(r.labelB)} : <span style="font-family:var(--mono);font-size:10px;color:var(--text2)">${r.onlyB.slice(0,5).join(', ')}${r.onlyB.length>5?'…':''}</span></div>` : ''}
       </div>
     </div>`;
   }
@@ -2577,7 +2602,7 @@ function renderCompareResult() {
     [...highAlerts, ...medAlerts].slice(0,8).forEach(a => {
       html += `<div style="display:flex;gap:8px;padding:7px 10px;background:var(--bg2);border-radius:3px;border-left:2px solid ${a.sev==='high'?'var(--amber)':'var(--nxl-teal)'};margin-bottom:4px;align-items:center">
         <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${a.sev==='high'?'var(--amber)':'var(--nxl-teal)'}">${a.col}</span>
-        <span style="font-size:11px;color:var(--text2);flex:1">${a.msg}</span>
+        <span style="font-size:11px;color:var(--text2);flex:1">${esc(a.msg)}</span>
       </div>`;
     });
     html += '<div style="margin-bottom:16px"></div>';
@@ -2588,11 +2613,11 @@ function renderCompareResult() {
   <div style="overflow-x:auto"><table class="tbl">
     <thead><tr>
       <th>Colonne</th>
-      <th>Nulls ${r.labelA}</th>
-      <th>Nulls ${r.labelB}</th>
+      <th>Nulls ${esc(r.labelA)}</th>
+      <th>Nulls ${esc(r.labelB)}</th>
       <th>Δ Nulls</th>
-      <th>Distincts ${r.labelA}</th>
-      <th>Distincts ${r.labelB}</th>
+      <th>Distincts ${esc(r.labelA)}</th>
+      <th>Distincts ${esc(r.labelB)}</th>
       <th>Nouvelles valeurs</th>
       <th>Valeurs disparues</th>
       ${r.colComparisons.some(c=>c.distShift) ? `<th>Δ Moyenne</th>` : ''}
@@ -2603,7 +2628,7 @@ function renderCompareResult() {
       const nullColor = Math.abs(nullDiff)>=20?'var(--red)':Math.abs(nullDiff)>=5?'var(--amber)':'var(--text1)';
       const hasAlert = c.alerts.length > 0;
       return `<tr style="${hasAlert?'background:rgba(177,0,49,.03)':''}">
-        <td><span style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:${hasAlert?'var(--nxl-red)':'var(--text0)'}">${c.name}</span></td>
+        <td><span style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:${hasAlert?'var(--nxl-red)':'var(--text0)'}">${esc(c.name)}</span></td>
         <td style="font-family:var(--mono);font-size:10px">${c.nullRateA}%</td>
         <td style="font-family:var(--mono);font-size:10px">${c.nullRateB}%</td>
         <td style="font-family:var(--mono);font-size:10px;color:${nullColor};font-weight:700">${nullDiff>0?'+':''}${nullDiff}pp</td>
