@@ -625,6 +625,7 @@ function buildTabs() {
     tabs.push({id:'profiling',label:'Profiling',cls:'green'});
     tabs.push({id:'issues',label:'Anomalies',cls:'green'});
     tabs.push({id:'schema-data',label:'◇ Schéma',cls:'green'});
+    tabs.push({id:'rules',label:'⚙ Règles',cls:'green'});
     if (aiInsights) tabs.push({id:'ai',label:'✦ IA Insights',cls:'green'});
   }
   if (!tabs.length) tabs = [{id:'welcome',label:'Accueil',cls:''}];
@@ -656,6 +657,7 @@ function renderContent() {
     welcome: renderWelcome,
     'compare-result': renderCompareResult,
     'schema-data': renderSchemaData,
+    'rules': renderRules,
     pipeline: renderPipeline,
     mermaid: renderMermaidView,
     'dq-code': renderDQCode,
@@ -2259,6 +2261,156 @@ function copyMermaidCode() {
   navigator.clipboard.writeText(window._lastMermaidCode || '');
 }
 
+
+
+// ─── RÈGLES MÉTIER CONFIGURABLES ──────────────────────────────
+let businessRules = {}; // { tableName: { colName: { minVal, maxVal, allowedVals, maxNullPct } } }
+
+function getRules(table, col) {
+  return (businessRules[table] || {})[col] || {};
+}
+
+function setRule(table, col, key, value) {
+  if (!businessRules[table]) businessRules[table] = {};
+  if (!businessRules[table][col]) businessRules[table][col] = {};
+  if (value === '' || value === null) {
+    delete businessRules[table][col][key];
+  } else {
+    businessRules[table][col][key] = value;
+  }
+  // Recalculer les violations
+  applyRules(table);
+}
+
+function applyRules(table) {
+  const dq = dqResults[table];
+  if (!dq) return;
+  const rules = businessRules[table] || {};
+  dq.columns.forEach(col => {
+    const r = rules[col.name];
+    if (!r) { col.ruleViolations = []; return; }
+    const violations = [];
+    const t = dbTables[table];
+    if (!t) return;
+    const vals = t.rows.map(row => row[col.name]).filter(v => v !== null && v !== undefined && String(v).trim() !== '');
+
+    // Taux de nulls max
+    if (r.maxNullPct !== undefined && r.maxNullPct !== '') {
+      const actualPct = col.nullCount / (dq.rowCount || 1) * 100;
+      if (actualPct > parseFloat(r.maxNullPct)) {
+        violations.push({ rule: 'Nulls max', msg: `${Math.round(actualPct*10)/10}% de nulls > seuil ${r.maxNullPct}%`, sev: 'high' });
+      }
+    }
+
+    // Bornes numériques
+    if ((r.minVal !== undefined && r.minVal !== '') || (r.maxVal !== undefined && r.maxVal !== '')) {
+      const nums = vals.map(v => parseFloat(String(v).replace(/,/g,'.'))).filter(v => !isNaN(v));
+      if (nums.length) {
+        const min = Math.min(...nums), max = Math.max(...nums);
+        if (r.minVal !== '' && r.minVal !== undefined && min < parseFloat(r.minVal)) {
+          const count = nums.filter(v => v < parseFloat(r.minVal)).length;
+          violations.push({ rule: 'Borne min', msg: `${count} valeur(s) < ${r.minVal} (min observé: ${min})`, sev: 'high' });
+        }
+        if (r.maxVal !== '' && r.maxVal !== undefined && max > parseFloat(r.maxVal)) {
+          const count = nums.filter(v => v > parseFloat(r.maxVal)).length;
+          violations.push({ rule: 'Borne max', msg: `${count} valeur(s) > ${r.maxVal} (max observé: ${max})`, sev: 'high' });
+        }
+      }
+    }
+
+    // Domaines autorisés
+    if (r.allowedVals && r.allowedVals.trim()) {
+      const allowed = new Set(r.allowedVals.split(',').map(v => v.trim().toLowerCase()));
+      const invalid = vals.filter(v => !allowed.has(String(v).trim().toLowerCase()));
+      if (invalid.length) {
+        const sample = [...new Set(invalid)].slice(0, 3).join(', ');
+        violations.push({ rule: 'Domaine', msg: `${invalid.length} valeur(s) hors domaine : ${sample}`, sev: 'high' });
+      }
+    }
+
+    col.ruleViolations = violations;
+  });
+
+  // Mettre à jour les tabs pour montrer les violations
+  buildTabs();
+  if (activeTab === 'rules' || activeTab === 'dq-data') renderContent();
+}
+
+function renderRules() {
+  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  if (!names.length) return '<div class="notice notice-amber">Aucune table profilée.</div>';
+
+  let html = '';
+
+  names.forEach(name => {
+    const dq = dqResults[name];
+    if (!dq?.columns) return;
+
+    // Compter les violations
+    const violations = dq.columns.reduce((s, c) => s + (c.ruleViolations?.length || 0), 0);
+    const rulesSet = Object.keys(businessRules[name] || {}).length;
+
+    html += `<div class="panel fu" style="margin-bottom:16px">
+      <div class="panel-hdr">
+        <div class="panel-title">${esc(name)} — Règles métier</div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--text2)">
+          ${rulesSet} règle(s) configurée(s)
+          ${violations ? `<span style="color:var(--nxl-red);margin-left:8px">⚠ ${violations} violation(s)</span>` : ''}
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead><tr>
+          <th>Colonne</th><th>Type</th>
+          <th>Min</th><th>Max</th>
+          <th>Domaines autorisés</th>
+          <th>Nulls max %</th>
+          <th>Statut</th>
+        </tr></thead>
+        <tbody>`;
+
+    dq.columns.forEach(col => {
+      const r = getRules(name, col.name);
+      const v = col.ruleViolations || [];
+      const rowColor = v.length ? 'background:rgba(177,0,49,.05)' : '';
+
+      html += `<tr style="${rowColor}">
+        <td style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:${v.length?'var(--nxl-red)':'var(--text0)'}">${esc(col.name)}</td>
+        <td style="font-family:var(--mono);font-size:10px;color:var(--text2)">${col.type}</td>
+        <td><input type="number" step="any" placeholder="—"
+          value="${r.minVal !== undefined ? r.minVal : ''}"
+          onchange="setRule('${esc(name)}','${esc(col.name)}','minVal',this.value)"
+          style="width:70px;background:var(--bg2);border:1px solid var(--border2);border-radius:2px;color:var(--text0);font-family:var(--mono);font-size:10px;padding:3px 6px"
+          ${col.type !== 'NUMERIC' ? 'disabled style="opacity:.4;width:70px"' : ''}></td>
+        <td><input type="number" step="any" placeholder="—"
+          value="${r.maxVal !== undefined ? r.maxVal : ''}"
+          onchange="setRule('${esc(name)}','${esc(col.name)}','maxVal',this.value)"
+          style="width:70px;background:var(--bg2);border:1px solid var(--border2);border-radius:2px;color:var(--text0);font-family:var(--mono);font-size:10px;padding:3px 6px"
+          ${col.type !== 'NUMERIC' ? 'disabled style="opacity:.4;width:70px"' : ''}></td>
+        <td><input type="text" placeholder="ex: ACTIF,DEFAUT,RESTRUCTURE"
+          value="${r.allowedVals !== undefined ? esc(r.allowedVals) : ''}"
+          onchange="setRule('${esc(name)}','${esc(col.name)}','allowedVals',this.value)"
+          style="width:200px;background:var(--bg2);border:1px solid var(--border2);border-radius:2px;color:var(--text0);font-family:var(--mono);font-size:10px;padding:3px 6px"></td>
+        <td><input type="number" min="0" max="100" step="1" placeholder="—"
+          value="${r.maxNullPct !== undefined ? r.maxNullPct : ''}"
+          onchange="setRule('${esc(name)}','${esc(col.name)}','maxNullPct',this.value)"
+          style="width:60px;background:var(--bg2);border:1px solid var(--border2);border-radius:2px;color:var(--text0);font-family:var(--mono);font-size:10px;padding:3px 6px"></td>
+        <td style="font-size:10px">
+          ${v.length
+            ? v.map(viol => `<div style="color:var(--nxl-red);margin-bottom:2px">⚠ ${esc(viol.msg)}</div>`).join('')
+            : Object.keys(r).length
+              ? '<span style="color:var(--green)">✓ OK</span>'
+              : '<span style="color:var(--text3)">—</span>'
+          }
+        </td>
+      </tr>`;
+    });
+
+    html += `</tbody></table></div></div>`;
+  });
+
+  return html;
+}
 
 // ─── COLUMN DETAIL MODAL (DB) ───
 function showDBCol(tableName, colIdx) {
