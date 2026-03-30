@@ -12,6 +12,10 @@ Anthropic directement — la clé API ne sort jamais du serveur.
 
 import os
 import httpx
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -30,12 +34,14 @@ if not ANTHROPIC_API_KEY:
 
 app = FastAPI(title="Pipeline DQ Proxy", version="1.0.0")
 
-# Autoriser les requêtes depuis le navigateur (GitHub Pages ou local)
+# CORS — restreint par défaut, configurable via variable d'env ALLOWED_ORIGINS
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restreindre en production à votre domaine
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["POST", "GET"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -48,20 +54,48 @@ def health():
     }
 
 
+# Token d'accès optionnel (recommandé en prod) — configurable via ACCESS_TOKEN
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN", "")
+
+def check_auth(request: Request):
+    if not ACCESS_TOKEN:
+        return  # Pas de token configuré = accès libre (dev local)
+    token = request.headers.get("X-Access-Token", "")
+    if token != ACCESS_TOKEN:
+        raise HTTPException(status_code=401, detail="Token d'accès invalide.")
+
+MAX_PAYLOAD_BYTES = 512 * 1024  # 512 Ko max
+
 @app.post("/api/analyse")
 async def analyse(request: Request):
     """
-    Proxy vers Anthropic API.
-    Reçoit le body JSON du frontend et le transmet à Anthropic
-    avec la clé API stockée côté serveur.
+    Proxy sécurisé vers Anthropic API.
+    - Auth par token (optionnel)
+    - Limite de taille du payload
+    - Validation minimale du body
+    - Clé API stockée côté serveur uniquement
     """
+    check_auth(request)
+
     if not ANTHROPIC_API_KEY:
         raise HTTPException(
             status_code=500,
             detail="Clé API Anthropic non configurée sur le serveur."
         )
 
-    body = await request.json()
+    # Limiter la taille du payload
+    body_bytes = await request.body()
+    if len(body_bytes) > MAX_PAYLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"Payload trop grand (max {MAX_PAYLOAD_BYTES//1024} Ko).")
+
+    try:
+        body = __import__('json').loads(body_bytes)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Body JSON invalide.")
+
+    # Validation minimale : on attend model + messages
+    if "model" not in body or "messages" not in body:
+        raise HTTPException(status_code=400, detail="Champs 'model' et 'messages' requis.")
 
     async with httpx.AsyncClient(timeout=200.0) as client:
         response = await client.post(
@@ -74,19 +108,24 @@ async def analyse(request: Request):
             json=body,
         )
 
-    if response.status_code != 200:
+    if response.status_code == 401:
+        raise HTTPException(status_code=502, detail="Clé API Anthropic invalide ou expirée.")
+    elif response.status_code == 429:
+        raise HTTPException(status_code=429, detail="Quota API Anthropic dépassé — réessayez dans quelques instants.")
+    elif response.status_code != 200:
         raise HTTPException(
             status_code=response.status_code,
-            detail=f"Erreur Anthropic : {response.text[:300]}"
+            detail=f"Erreur Anthropic ({response.status_code}) : {response.text[:200]}"
         )
 
+    logger.info(f"Proxy Anthropic OK — {response.status_code} — {len(body_bytes)} bytes")
     return response.json()
 
 
 # Servir le fichier HTML statique si présent dans le même dossier
 @app.get("/")
 def serve_frontend():
-    html_path = os.path.join(os.path.dirname(__file__), "pipeline_doc_dq_tool.html")
+    html_path = os.path.join(os.path.dirname(__file__), "pipeline_doc_dq_tool_client.html")
     if os.path.exists(html_path):
         return FileResponse(html_path)
     return {"message": "Frontend non trouvé. Placez pipeline_doc_dq_tool.html dans le même dossier."}

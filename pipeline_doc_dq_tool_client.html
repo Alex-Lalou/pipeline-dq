@@ -706,7 +706,7 @@ async function analyseCode() {
   }, 300);
 
   try {
-    const fetchPromise = fetch('https://api.anthropic.com/v1/messages', {
+    const fetchPromise = fetch(getApiUrl(), {
       method:'POST', headers:buildHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:16000,
@@ -2037,7 +2037,12 @@ function renderProfiling() {
   }
 
   const isSampled = dq.rowCount !== dbTables[name]?.rowCount && dbTables[name]?.rowCount > dq.rowCount;
-  html += `<div class="panel fu"><div class="panel-hdr"><div class="panel-title">${esc(name)} — Profil par colonne</div><div style="font-size:10px;color:var(--text2);font-family:var(--mono)">${dq.rowCount.toLocaleString()} lignes · ${dq.colCount} colonnes${isSampled ? ' · <span style="color:var(--amber)">échantillon</span>' : ''}</div></div>
+  const exactNote = dq.streaming
+    ? `<span style="font-size:9px;font-family:var(--mono);color:var(--amber);margin-left:6px" title="Métriques calculées sur réservoir de ${(dq.sampleSize||0).toLocaleString()} lignes parmi ${(dq.rowCount||0).toLocaleString()}">⚡ estimé</span>`
+    : dq.sampled
+    ? `<span style="font-size:9px;font-family:var(--mono);color:var(--amber);margin-left:6px" title="Métriques calculées sur échantillon de ${(dq.sampleSize||0).toLocaleString()} lignes parmi ${(dq.rowCount||0).toLocaleString()}">⚡ échantillon</span>`
+    : `<span style="font-size:9px;font-family:var(--mono);color:var(--green);margin-left:6px">✓ exact</span>`;
+  html += `<div class="panel fu"><div class="panel-hdr"><div class="panel-title">${esc(name)} — Profil par colonne ${exactNote}</div><div style="font-size:10px;color:var(--text2);font-family:var(--mono)">${dq.rowCount.toLocaleString()} lignes · ${dq.colCount} colonnes${isSampled ? ' · <span style="color:var(--amber)">échantillon</span>' : ''}</div></div>
     <div style="overflow-x:auto"><table class="tbl">
       <thead><tr><th>Colonne</th><th>Type inféré</th><th>Complétude</th><th>Taux distincts</th><th>Validité</th><th>Valeurs nulles</th><th>Distincts</th><th>Anomalies</th></tr></thead>
       <tbody>${dq.columns.map((c,i)=>`<tr>
@@ -2234,10 +2239,15 @@ function getApiUrl() {
   return PROXY_URL ? PROXY_URL + '/api/analyse' : 'https://api.anthropic.com/v1/messages';
 }
 
+// Token d'accès pour le proxy (optionnel — doit correspondre à ACCESS_TOKEN côté serveur)
+const PROXY_ACCESS_TOKEN = ''; // Laisser vide si pas de token configuré
+
 function buildHeaders() {
   if (PROXY_URL) {
-    // Mode proxy : pas de clé dans les headers, c'est le serveur qui gère
-    return { 'Content-Type': 'application/json' };
+    // Mode proxy : pas de clé API dans les headers, c'est le serveur qui gère
+    const h = { 'Content-Type': 'application/json' };
+    if (PROXY_ACCESS_TOKEN) h['X-Access-Token'] = PROXY_ACCESS_TOKEN;
+    return h;
   }
   // Mode direct : clé en front (usage interne uniquement)
   const key = localStorage.getItem('nxl_key') || '';

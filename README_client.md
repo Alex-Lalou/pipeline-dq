@@ -75,3 +75,32 @@ Navigateur client
 - Détection automatique si le serveur proxy est joignable
 - `localStorage` désactivé pour la clé
 
+
+---
+
+## Sécurité avancée (optionnel)
+
+### Token d'accès
+Pour restreindre l'accès au proxy :
+
+```bash
+export ACCESS_TOKEN=mon-token-secret
+```
+
+Puis dans `pipeline_doc_dq_tool_client.html`, ligne `PROXY_ACCESS_TOKEN` :
+```javascript
+const PROXY_ACCESS_TOKEN = 'mon-token-secret';
+```
+
+### CORS restreint
+Par défaut : `localhost:8000` uniquement.
+Pour autoriser d'autres origines :
+```bash
+export ALLOWED_ORIGINS=http://monserveur.banque.fr,http://localhost:8000
+```
+
+### Taille max payload
+512 Ko par défaut — protège contre les abus.
+
+### Logs
+Chaque appel proxy est loggé avec timestamp, statut et taille.
