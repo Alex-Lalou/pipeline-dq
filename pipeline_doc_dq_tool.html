@@ -624,6 +624,7 @@ function buildTabs() {
     tabs.push({id:'dq-data',label:'◉ DQ Données',cls:'green'});
     tabs.push({id:'profiling',label:'Profiling',cls:'green'});
     tabs.push({id:'issues',label:'Anomalies',cls:'green'});
+    tabs.push({id:'schema-data',label:'◇ Schéma',cls:'green'});
     if (aiInsights) tabs.push({id:'ai',label:'✦ IA Insights',cls:'green'});
   }
   if (!tabs.length) tabs = [{id:'welcome',label:'Accueil',cls:''}];
@@ -654,6 +655,7 @@ function renderContent() {
   const render = {
     welcome: renderWelcome,
     'compare-result': renderCompareResult,
+    'schema-data': renderSchemaData,
     pipeline: renderPipeline,
     mermaid: renderMermaidView,
     'dq-code': renderDQCode,
@@ -2163,6 +2165,100 @@ function renderAI() {
   }
   return html;
 }
+
+
+// ─── SCHÉMA MERMAID MODE DONNÉES ───────────────────────────
+function renderSchemaData() {
+  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  if (!names.length) return '<div class="notice notice-amber">Aucune table profilée.</div>';
+
+  // Générer le code Mermaid erDiagram
+  let mermaid_code = 'erDiagram\n';
+
+  names.forEach(name => {
+    const dq = dqResults[name];
+    if (!dq?.columns) return;
+    const safeName = name.replace(/[^A-Z0-9_]/gi, '_');
+    mermaid_code += `  ${safeName} {\n`;
+    dq.columns.slice(0, 30).forEach(col => { // max 30 colonnes pour lisibilité
+      const safeCol = col.name.replace(/[^A-Z0-9_]/gi, '_');
+      const type = col.type || 'STRING';
+      const nullable = col.nullCount > 0 ? '' : ' PK';
+      mermaid_code += `    ${type} ${safeCol}\n`;
+    });
+    if (dq.columns.length > 30) {
+      mermaid_code += `    STRING _et_${dq.columns.length - 30}_autres\n`;
+    }
+    mermaid_code += '  }\n';
+  });
+
+  // Détecter les relations potentielles entre tables (colonnes avec mêmes noms)
+  const relations = [];
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const colsA = new Set((dqResults[names[i]]?.columns || []).map(c => c.name));
+      const colsB = new Set((dqResults[names[j]]?.columns || []).map(c => c.name));
+      const common = [...colsA].filter(c => colsB.has(c) && /id|key|code|ref/i.test(c));
+      if (common.length) {
+        const a = names[i].replace(/[^A-Z0-9_]/gi, '_');
+        const b = names[j].replace(/[^A-Z0-9_]/gi, '_');
+        relations.push(`  ${a} ||--o{ ${b} : "${esc(common[0])}"`);
+      }
+    }
+  }
+  if (relations.length) mermaid_code += relations.join('\n') + '\n';
+
+  const schemaId = 'schema-data-mermaid-' + Date.now();
+
+  setTimeout(async () => {
+    try {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+          primaryColor: '#10131a',
+          primaryTextColor: '#dde4f5',
+          primaryBorderColor: '#2e3a55',
+          lineColor: '#409ABB',
+          secondaryColor: '#161b25',
+          tertiaryColor: '#1e2433',
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '12px',
+        },
+        securityLevel: 'loose',
+      });
+      const { svg } = await mermaid.render(schemaId, mermaid_code);
+      const container = document.getElementById('schema-data-container');
+      if (container) container.innerHTML = svg;
+    } catch(e) {
+      const container = document.getElementById('schema-data-container');
+      if (container) container.innerHTML = `<div class="notice notice-amber">Erreur schéma : ${esc(e.message)}<br><pre style="font-size:10px;color:var(--text2);margin-top:8px;white-space:pre-wrap">${esc(mermaid_code)}</pre></div>`;
+    }
+  }, 100);
+
+  const tableCount = names.length;
+  const colCount = names.reduce((s, n) => s + (dqResults[n]?.columns?.length || 0), 0);
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text0)">${tableCount} table${tableCount>1?'s':''}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text2);margin-left:8px">${colCount} colonnes au total</span>
+        ${relations.length ? `<span style="font-family:var(--mono);font-size:10px;color:var(--nxl-teal);margin-left:8px">${relations.length} relation${relations.length>1?'s':''} détectée${relations.length>1?'s':''}</span>` : ''}
+      </div>
+      <button class="btn btn-ghost" onclick="copyMermaidCode()" title="Copier le code Mermaid">⧉ Code Mermaid</button>
+    </div>
+    <div id="schema-data-container" style="background:var(--bg1);border:1px solid var(--border);border-radius:4px;padding:16px;min-height:200px;overflow:auto;text-align:center">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--text2)">Génération du schéma…</div>
+    </div>
+    <script>window._lastMermaidCode = ${JSON.stringify(mermaid_code)};<\/script>
+  `;
+}
+
+function copyMermaidCode() {
+  navigator.clipboard.writeText(window._lastMermaidCode || '');
+}
+
 
 // ─── COLUMN DETAIL MODAL (DB) ───
 function showDBCol(tableName, colIdx) {
