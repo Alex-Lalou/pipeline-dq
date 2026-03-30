@@ -1968,6 +1968,36 @@ function exportPDF() {
   doc.save('rapport_dq_nexialog.pdf');
 }
 
+
+// ── SCORE DE CONFIANCE DQ ──
+function confidenceScore(dq) {
+  if (!dq) return null;
+  const total = dq.rowCount || 0;
+  const sample = dq.sampleSize || total;
+  const ratio = total > 0 ? sample / total : 1;
+
+  if (!dq.sampled && !dq.streaming) {
+    return { level: 'high', label: 'Élevée', icon: '●', color: 'var(--green)',
+      detail: `Calcul exact sur ${total.toLocaleString()} lignes` };
+  }
+  if (sample >= 50000 || ratio >= 0.9) {
+    return { level: 'medium-high', label: 'Bonne', icon: '◕', color: 'var(--nxl-teal)',
+      detail: `Échantillon ${sample.toLocaleString()}/${total.toLocaleString()} lignes (${Math.round(ratio*100)}%)` };
+  }
+  if (sample >= 10000 || ratio >= 0.5) {
+    return { level: 'medium', label: 'Moyenne', icon: '◑', color: 'var(--amber)',
+      detail: `Échantillon ${sample.toLocaleString()}/${total.toLocaleString()} lignes (${Math.round(ratio*100)}%)` };
+  }
+  return { level: 'low', label: 'Faible', icon: '○', color: 'var(--red)',
+    detail: `Échantillon réduit : ${sample.toLocaleString()}/${total.toLocaleString()} lignes — interpréter avec précaution` };
+}
+
+function renderConfidenceBadge(dq) {
+  const c = confidenceScore(dq);
+  if (!c) return '';
+  return `<span title="${c.detail}" style="font-family:var(--mono);font-size:10px;color:${c.color};cursor:help;margin-left:8px">${c.icon} Confiance ${c.label}</span>`;
+}
+
 function renderDQData() {
   const tables = Object.entries(dqResults).filter(([k]) => k !== '__compare__');
   if (!tables.length) return '<div class="notice notice-amber">Aucune table profilée. Importez des fichiers et lancez l\'analyse.</div>';
@@ -1975,13 +2005,16 @@ function renderDQData() {
   const scoreColor = v => v>=90?'var(--green)':v>=70?'var(--amber)':'var(--red)';
   const riskColors = {low:'var(--green)',medium:'var(--amber)',high:'var(--red)',critical:'var(--red)'};
 
-  let html = `<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:16px">
-    <button class="btn btn-ghost" onclick="exportExcel()" title="Exporter en Excel">
-      <span style="font-size:12px">⬇</span> Excel
-    </button>
-    <button class="btn btn-primary" onclick="exportPDF()" title="Exporter en PDF">
-      <span style="font-size:12px">⬇</span> PDF
-    </button>
+  let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:3px;font-size:10px;color:var(--text2);font-family:var(--mono)">
+    <span>Confiance des métriques :</span>
+    <span style="color:var(--green)">● Élevée = exact</span>
+    <span style="color:var(--nxl-teal)">◕ Bonne = éch. &gt;50k</span>
+    <span style="color:var(--amber)">◑ Moyenne = éch. &gt;10k</span>
+    <span style="color:var(--red)">○ Faible = éch. &lt;10k</span>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" onclick="exportExcel()" title="Exporter en Excel"><span style="font-size:12px">⬇</span> Excel</button>
+      <button class="btn btn-primary" onclick="exportPDF()" title="Exporter en PDF"><span style="font-size:12px">⬇</span> PDF</button>
+    </div>
   </div>`;
 
   // Global summary
@@ -1992,7 +2025,7 @@ function renderDQData() {
       <div class="score-info">
         <div class="score-info-lbl">Score qualité global — ${tables.length} tables</div>
         <div class="score-bar-bg"><div class="score-bar-fill" style="width:${avgScore}%;background:${scoreColor(avgScore)}"></div></div>
-        <div class="score-breakdown">${tables.map(([n,dq])=>`<div class="sbd-item">${n}: <span class="sbd-v" style="color:${scoreColor(Math.round(dq.overallScore))}">${Math.round(dq.overallScore)}%</span></div>`).join('')}</div>
+        <div class="score-breakdown">${tables.map(([n,dq])=>`<div class="sbd-item">${n}: <span class="sbd-v" style="color:${scoreColor(Math.round(dq.overallScore))}">${Math.round(dq.overallScore)}%</span> ${renderConfidenceBadge(dq)}</div>`).join('')}</div>
       </div>
     </div>`;
   }
@@ -2004,7 +2037,7 @@ function renderDQData() {
     const highIssues = dq.issues.filter(i=>i.sev==='high').length;
     html += `<div class="panel fu" style="margin-bottom:14px">
       <div class="panel-hdr">
-        <div class="panel-title" style="color:${scoreColor(score)}">${esc(name)} <span style="font-size:18px;margin-left:4px">${score}%</span></div>
+        <div class="panel-title" style="color:${scoreColor(score)}">${esc(name)} <span style="font-size:18px;margin-left:4px">${score}%</span>${renderConfidenceBadge(dq)}</div>
         <div style="font-size:10px;color:var(--text2);font-family:var(--mono)">${dq.rowCount.toLocaleString()} lignes · ${dq.colCount} colonnes</div>
         ${dq.sampled ? `<span class="sample-badge">⚡ échantillon ${Number(dq.sampleSize).toLocaleString()} lignes</span>` : ''}
         <button class="btn btn-ghost" style="padding:4px 10px;font-size:9px" onclick="selDBTable='${esc(name)}';setTab('profiling',null)">Profil détaillé →</button>
