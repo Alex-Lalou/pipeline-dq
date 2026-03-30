@@ -509,7 +509,7 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
         <div style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--nxl-teal);border-radius:3px;padding:10px 12px">
           <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--nxl-teal);margin-bottom:8px">Arrêté A</div>
           <div class="field" style="margin-bottom:6px">
-            <div class="flbl">Libellé</div>
+            <div class="flbl">Libellé arrêté</div>
             <input id="cmp-label-a" placeholder="ex: 2024-06-30" style="font-family:var(--mono);font-size:11px">
           </div>
           <div style="border:1px dashed var(--border2);border-radius:3px;padding:10px;text-align:center;position:relative;cursor:pointer" id="cmp-drop-a">
@@ -531,6 +531,13 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
       </div>
     </div>
     <div class="lp-foot">
+      <div class="field" style="margin-bottom:8px" id="cmp-key-wrap" style="display:none">
+        <div class="flbl">Clé métier (optionnel)</div>
+        <select id="cmp-key-col" style="background:var(--bg2);border:1px solid var(--border2);border-radius:3px;color:var(--text0);font-family:var(--mono);font-size:11px;padding:6px 10px;width:100%">
+          <option value="">— Sans clé (comparaison structurelle) —</option>
+        </select>
+        <div style="font-size:9px;color:var(--text2);margin-top:3px;font-family:var(--mono)">Si renseignée : réconciliation ligne à ligne</div>
+      </div>
       <button class="btn btn-primary btn-full" id="btn-compare" onclick="runComparison()" disabled>
         <div class="spinner" id="cmp-spin" style="display:none"></div>
         <span id="cmp-lbl">⇄ Lancer la comparaison</span>
@@ -958,7 +965,8 @@ function parseFile(file) {
           const distinctSize = a.distinctCapped ? 100000 : a.distinctSet.size;
           const nonNull = totalRows - a.nullCount;
           const completeness = totalRows ? (nonNull/totalRows)*100 : 0;
-          const uniqueness = totalRows ? (distinctSize/totalRows)*100 : 0;
+          // Unicité = distinct / nonNull (exclut les nulls du dénominateur)
+          const uniqueness = nonNull ? (distinctSize/nonNull)*100 : 0;
           let validity = 100;
           let stats = {};
           const issues = [];
@@ -1221,7 +1229,8 @@ function profileColumn(rows, header, total, totalRows){
   const sampleRate = rows.length / totalRows;
   const completeness = total ? ((total-nullCount)/total)*100 : 0;
   const distinct=new Set(strVals).size;
-  const uniqueness=strVals.length?(distinct/total)*100:0;
+  // Unicité = distinct / nonNull (exclut les nulls du dénominateur)
+  const uniqueness=strVals.length?(distinct/strVals.length)*100:0;
   const type=inferType(strVals);
 
   let stats={};
@@ -1413,10 +1422,24 @@ function inferType(vals) {
 function parseDate(v) {
   if (!v) return null;
   const s = String(v).trim();
-  // Common formats
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) { const d=new Date(s.slice(0,10)); return isNaN(d)?null:d.getTime(); }
-  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) { const p=s.split('/'); const d=new Date(`${p[2]}-${p[1]}-${p[0]}`); return isNaN(d)?null:d.getTime(); }
-  if (/^\d{8}$/.test(s)) { const d=new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`); return isNaN(d)?null:d.getTime(); }
+  let d;
+  // YYYY-MM-DD ou YYYY-MM-DDTHH:mm:ss (ISO)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) { d=new Date(s.slice(0,10)); return isNaN(d)?null:d.getTime(); }
+  // DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) { const p=s.split('/'); d=new Date(`${p[2]}-${p[1]}-${p[0]}`); return isNaN(d)?null:d.getTime(); }
+  // DD-MM-YYYY
+  if (/^\d{2}-\d{2}-\d{4}/.test(s)) { const p=s.split('-'); d=new Date(`${p[2]}-${p[1]}-${p[0]}`); return isNaN(d)?null:d.getTime(); }
+  // YYYY/MM/DD
+  if (/^\d{4}\/\d{2}\/\d{2}/.test(s)) { d=new Date(s.replace(/\//g,'-')); return isNaN(d)?null:d.getTime(); }
+  // YYYYMMDD
+  if (/^\d{8}$/.test(s)) { d=new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`); return isNaN(d)?null:d.getTime(); }
+  // Date Excel sérialisée (nombre entier ~40000-50000)
+  if (/^\d{4,5}$/.test(s)) {
+    const n=parseInt(s);
+    if (n>40000&&n<60000) { d=new Date((n-25569)*86400000); return isNaN(d)?null:d.getTime(); }
+  }
+  // Timestamp Unix (ms)
+  if (/^\d{13}$/.test(s)) { d=new Date(parseInt(s)); return isNaN(d)?null:d.getTime(); }
   return null;
 }
 
@@ -1693,6 +1716,8 @@ function exportExcel() {
     // Feuille résumé
     const summaryData = [
       ['Rapport DQ — ' + name],
+      ['Généré le', new Date().toLocaleString('fr-FR')],
+      ['Outil', 'Pipeline Doc + DQ Analyzer — Nexialog Consulting'],
       [],
       ['Score global', Math.round(dq.overallScore) + '%'],
       ['Complétude', Math.round(dq.completeness) + '%'],
@@ -2474,7 +2499,21 @@ function loadCompareFile(side, file) {
 
   const done = (rows, headers) => {
     cmpData[side] = { rows, headers, name };
-    if (cmpData.a && cmpData.b) document.getElementById('btn-compare').disabled = false;
+    if (cmpData.a && cmpData.b) {
+      document.getElementById('btn-compare').disabled = false;
+      // Peupler le sélecteur de clé avec les colonnes communes
+      const commonCols = cmpData.a.headers.filter(h => cmpData.b.headers.includes(h));
+      const sel = document.getElementById('cmp-key-col');
+      sel.innerHTML = '<option value="">— Sans clé (comparaison structurelle) —</option>';
+      commonCols.forEach(h => {
+        const opt = document.createElement('option');
+        opt.value = h; opt.textContent = h;
+        // Pré-sélectionner si ça ressemble à un identifiant
+        if (/^id_|_id$|^identif|^contrat|^client/i.test(h)) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      document.getElementById('cmp-key-wrap').style.display = 'block';
+    }
   };
 
   if (ext === 'csv') {
@@ -2499,7 +2538,8 @@ function runComparison() {
   setBtnLoad('btn-compare','cmp-spin','cmp-lbl','Comparaison en cours…');
 
   setTimeout(() => {
-    const result = compareDatasets(cmpData.a, cmpData.b);
+    const keyCol = document.getElementById('cmp-key-col').value;
+    const result = compareDatasets(cmpData.a, cmpData.b, keyCol);
     const labelA = document.getElementById('cmp-label-a').value || 'Arrêté A';
     const labelB = document.getElementById('cmp-label-b').value || 'Arrêté B';
     result.labelA = labelA;
@@ -2514,7 +2554,7 @@ function runComparison() {
   }, 50);
 }
 
-function compareDatasets(dsA, dsB) {
+function compareDatasets(dsA, dsB, keyCol='') {
   const hA = new Set(dsA.headers);
   const hB = new Set(dsB.headers);
   const common = dsA.headers.filter(h => hB.has(h));
@@ -2557,10 +2597,43 @@ function compareDatasets(dsA, dsB) {
     return { name:h, nullRateA, nullRateB, distinctA, distinctB, newInB: newInB.slice(0,10), goneFromA: goneFromA.slice(0,10), distShift, alerts };
   });
 
+  // ── Réconciliation par clé métier ──
+  let reconciliation = null;
+  if (keyCol && dsA.headers.includes(keyCol) && dsB.headers.includes(keyCol)) {
+    const mapA = new Map(dsA.rows.map(r => [String(r[keyCol]), r]));
+    const mapB = new Map(dsB.rows.map(r => [String(r[keyCol]), r]));
+    const keysA = new Set(mapA.keys());
+    const keysB = new Set(mapB.keys());
+    const added   = [...keysB].filter(k => !keysA.has(k));
+    const removed = [...keysA].filter(k => !keysB.has(k));
+    const common_keys = [...keysA].filter(k => keysB.has(k));
+    // Détecter les lignes modifiées sur colonnes numériques clés
+    let modified = 0;
+    const numCols = common.filter(h => h !== keyCol).slice(0, 10);
+    common_keys.forEach(k => {
+      const ra = mapA.get(k), rb = mapB.get(k);
+      const changed = numCols.some(col => {
+        const va = parseFloat(String(ra[col]).replace(/,/g,'.'));
+        const vb = parseFloat(String(rb[col]).replace(/,/g,'.'));
+        return !isNaN(va) && !isNaN(vb) && Math.abs(va-vb)/Math.abs(va||1) > 0.01;
+      });
+      if (changed) modified++;
+    });
+    reconciliation = {
+      keyCol,
+      added: added.length,
+      removed: removed.length,
+      common: common_keys.length,
+      modified,
+      addedSample: added.slice(0,5),
+      removedSample: removed.slice(0,5),
+    };
+  }
+
   return {
     rowsA: dsA.rows.length, rowsB: dsB.rows.length,
     colsA: dsA.headers.length, colsB: dsB.headers.length,
-    common, onlyA, onlyB, colComparisons
+    common, onlyA, onlyB, colComparisons, reconciliation
   };
 }
 
@@ -2592,6 +2665,36 @@ function renderCompareResult() {
       <div style="font-size:10px;color:var(--text2);margin-top:2px">${r.colsB} colonnes</div>
     </div>
   </div>`;
+
+  // ── Réconciliation par clé métier ──
+  if (r.reconciliation) {
+    const rec = r.reconciliation;
+    html += `<div style="background:var(--bg1);border:1px solid var(--border);border-top:3px solid var(--nxl-red);border-radius:3px;padding:14px 16px;margin-bottom:16px">
+      <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--nxl-red);margin-bottom:10px">
+        Réconciliation par clé — ${esc(rec.keyCol)}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div style="text-align:center;padding:10px;background:var(--bg2);border-radius:3px">
+          <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--green)">${rec.common.toLocaleString()}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:3px">Communs</div>
+        </div>
+        <div style="text-align:center;padding:10px;background:var(--bg2);border-radius:3px">
+          <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--nxl-teal)">${rec.added.toLocaleString()}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:3px">Nouveaux dans B</div>
+        </div>
+        <div style="text-align:center;padding:10px;background:var(--bg2);border-radius:3px">
+          <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:var(--amber)">${rec.removed.toLocaleString()}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:3px">Sortis de A</div>
+        </div>
+        <div style="text-align:center;padding:10px;background:var(--bg2);border-radius:3px">
+          <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:${rec.modified>0?'var(--nxl-red)':'var(--green)'}">${rec.modified.toLocaleString()}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:3px">Modifiés</div>
+        </div>
+      </div>
+      ${rec.addedSample.length ? `<div style="margin-top:10px;font-size:10px;color:var(--text2)">Nouveaux ex: <span style="font-family:var(--mono);color:var(--nxl-teal)">${rec.addedSample.map(k=>esc(k)).join(', ')}</span></div>` : ''}
+      ${rec.removedSample.length ? `<div style="margin-top:4px;font-size:10px;color:var(--text2)">Sortis ex: <span style="font-family:var(--mono);color:var(--amber)">${rec.removedSample.map(k=>esc(k)).join(', ')}</span></div>` : ''}
+    </div>`;
+  }
 
   // Column structure changes
   if (r.onlyA.length || r.onlyB.length) {
