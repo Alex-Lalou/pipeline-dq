@@ -268,8 +268,10 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
 .ai-label{font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--nxl-red);margin-bottom:6px}
 
 /* ─── PIPELINE NODES (code mode result) ─── */
-.pipe-canvas{position:relative;overflow-x:auto;margin-bottom:20px}
-.pipe-inner{position:relative}
+.pipe-canvas{position:relative;overflow:hidden;margin-bottom:20px;border:1px solid var(--border);border-radius:3px;background:var(--bg1);cursor:grab;user-select:none;min-height:200px}
+.pipe-canvas.grabbing{cursor:grabbing}
+.pipe-canvas-controls{display:flex;gap:6px;margin-bottom:8px;align-items:center}
+.pipe-inner{position:relative;transform-origin:0 0;will-change:transform}
 .pipe-svg{position:absolute;inset:0;pointer-events:none;overflow:visible}
 .pnode{position:absolute;cursor:pointer;border-radius:3px;border:1px solid var(--border2);background:var(--bg1);padding:10px 14px 10px 17px;transition:transform .15s,border-color .15s;overflow:hidden;min-width:155px}
 .pnode::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
@@ -1631,11 +1633,17 @@ function renderPipeline() {
       ${codeData.author?`<div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px">${codeData.author} · ${codeData.language}</div>`:''}
     </div>
     <div class="pipe-legend">${legend}</div>
-    <div class="pipe-canvas"><div class="pipe-inner" id="pcv" style="width:${CW}px;height:${CH}px">
+    <div class="pipe-canvas-controls">
+      <button class="btn btn-ghost" onclick="pipeZoom(0.15)" style="font-size:13px;padding:3px 8px" title="Zoom +">＋</button>
+      <button class="btn btn-ghost" onclick="pipeZoom(-0.15)" style="font-size:13px;padding:3px 8px" title="Zoom −">－</button>
+      <button class="btn btn-ghost" onclick="pipeReset()" style="font-size:10px;padding:3px 8px" title="Réinitialiser la vue">⌂ Reset</button>
+      <span id="pipe-zoom-lbl" style="font-family:var(--mono);font-size:10px;color:var(--text2)">100%</span>
+    </div>
+    <div class="pipe-canvas" id="pipe-canvas-wrap"><div class="pipe-inner" id="pcv" style="width:${CW}px;height:${CH}px">
       <svg class="pipe-svg" id="psvg" width="${CW}" height="${CH}"></svg>
       ${nodesHtml}
     </div></div>
-    <div style="font-size:10px;color:var(--text3);text-align:center;margin:-12px 0 16px;font-family:var(--mono)">Cliquez sur une table pour explorer</div>
+    <div style="font-size:10px;color:var(--text3);text-align:center;margin:4px 0 16px;font-family:var(--mono)">Scroll pour zoomer · Glisser pour naviguer · Cliquez sur une table pour explorer</div>
     <div id="code-node-detail">${detail}</div>`;
 }
 
@@ -1650,6 +1658,108 @@ function drawArrows() {
   });
   svg.innerHTML=p;
 }
+
+
+// ─── ZOOM / PAN PIPELINE ────────────────────────────────
+let _pipeScale = 1;
+let _pipePan = { x: 0, y: 0 };
+let _pipeIsDragging = false;
+let _pipeDragStart = { x: 0, y: 0 };
+let _pipePanStart = { x: 0, y: 0 };
+
+function pipeApplyTransform() {
+  const inner = document.getElementById('pcv');
+  if (!inner) return;
+  inner.style.transform = `translate(${_pipePan.x}px, ${_pipePan.y}px) scale(${_pipeScale})`;
+  const lbl = document.getElementById('pipe-zoom-lbl');
+  if (lbl) lbl.textContent = Math.round(_pipeScale * 100) + '%';
+}
+
+function pipeZoom(delta) {
+  _pipeScale = Math.min(2.5, Math.max(0.2, _pipeScale + delta));
+  pipeApplyTransform();
+}
+
+function pipeReset() {
+  _pipeScale = 1;
+  _pipePan = { x: 0, y: 0 };
+  pipeApplyTransform();
+}
+
+function initPipeInteraction() {
+  const canvas = document.getElementById('pipe-canvas-wrap');
+  if (!canvas || canvas._pipeInit) return;
+  canvas._pipeInit = true;
+
+  // Zoom avec la molette
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    // Zoom centré sur le curseur
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const prevScale = _pipeScale;
+    _pipeScale = Math.min(2.5, Math.max(0.2, _pipeScale + delta));
+    // Ajuster le pan pour que le point sous le curseur reste fixe
+    _pipePan.x = mouseX - (mouseX - _pipePan.x) * (_pipeScale / prevScale);
+    _pipePan.y = mouseY - (mouseY - _pipePan.y) * (_pipeScale / prevScale);
+    pipeApplyTransform();
+  }, { passive: false });
+
+  // Pan par glissement
+  canvas.addEventListener('mousedown', e => {
+    if (e.target.closest('.pnode')) return; // ne pas interférer avec les clics sur les nœuds
+    _pipeIsDragging = true;
+    _pipeDragStart = { x: e.clientX, y: e.clientY };
+    _pipePanStart = { ..._pipePan };
+    canvas.classList.add('grabbing');
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!_pipeIsDragging) return;
+    _pipePan.x = _pipePanStart.x + (e.clientX - _pipeDragStart.x);
+    _pipePan.y = _pipePanStart.y + (e.clientY - _pipeDragStart.y);
+    pipeApplyTransform();
+  });
+
+  window.addEventListener('mouseup', () => {
+    _pipeIsDragging = false;
+    canvas.classList.remove('grabbing');
+  });
+
+  // Touch support
+  let _touchStart = null;
+  let _touchDist = null;
+  canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      _touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, pan: { ..._pipePan } };
+    } else if (e.touches.length === 2) {
+      _touchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+  }, { passive: true });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && _touchStart) {
+      _pipePan.x = _touchStart.pan.x + (e.touches[0].clientX - _touchStart.x);
+      _pipePan.y = _touchStart.pan.y + (e.touches[0].clientY - _touchStart.y);
+      pipeApplyTransform();
+    } else if (e.touches.length === 2 && _touchDist) {
+      const newDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      _pipeScale = Math.min(2.5, Math.max(0.2, _pipeScale * (newDist / _touchDist)));
+      _touchDist = newDist;
+      pipeApplyTransform();
+    }
+  }, { passive: false });
+}
+
 
 function selNode(id) { selCodeNode=selCodeNode===id?null:id; renderContent(); }
 
