@@ -493,11 +493,36 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
           <div class="progress-detail" id="progress-detail"></div>
         </div>
       </div>
+      <button class="btn btn-ghost btn-full" id="btn-rules" onclick="toggleRulesPanel()" style="margin-bottom:6px">
+        ⚙ Règles métier
+      </button>
+      <div id="rules-panel" class="hidden" style="background:var(--bg1);border:1px solid var(--border);border-radius:3px;padding:10px;margin-bottom:8px">
+        <div style="font-family:var(--title);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text2);margin-bottom:8px">Configurer les règles</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="rule-col" placeholder="Colonne (ex: PD)" style="flex:1;font-family:var(--mono);font-size:10px">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+          <input id="rule-min" placeholder="Min (ex: 0)" style="font-family:var(--mono);font-size:10px">
+          <input id="rule-max" placeholder="Max (ex: 1)" style="font-family:var(--mono);font-size:10px">
+        </div>
+        <input id="rule-domain" placeholder="Valeurs autorisées (ex: A,B,C)" style="font-family:var(--mono);font-size:10px;margin-bottom:6px;width:100%;box-sizing:border-box">
+        <input id="rule-nullmax" placeholder="Nulls max % (ex: 5)" style="font-family:var(--mono);font-size:10px;margin-bottom:6px;width:100%;box-sizing:border-box">
+        <input id="rule-regex" placeholder="Format regex (ex: ^CTR[0-9]+$)" style="font-family:var(--mono);font-size:10px;margin-bottom:8px;width:100%;box-sizing:border-box">
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button class="btn btn-primary" style="flex:1;font-size:10px" onclick="addRule()">+ Ajouter</button>
+          <button class="btn btn-ghost" style="font-size:10px" onclick="importRulesFile()">⬆ Import JSON</button>
+          <input type="file" id="rules-file-input" accept=".json" style="display:none" onchange="loadRulesFile(this.files[0])">
+        </div>
+        <div id="rules-list" style="font-family:var(--mono);font-size:10px;color:var(--text2)">Aucune règle définie</div>
+      </div>
       <button class="btn btn-green btn-full" id="btn-dq" onclick="runFullDQ()" disabled>
         <div class="spinner" id="dq-spin" style="display:none"></div>
         <span id="dq-lbl">⊞ Lancer l'analyse DQ</span>
       </button>
       <div id="dq-status" style="display:none"></div>
+      <button class="btn btn-ghost btn-full" id="btn-apply-rules" onclick="applyAllBusinessRules()" style="margin-top:6px;display:none">
+        ✓ Appliquer les règles métier
+      </button>
     </div>
   </div>
 
@@ -657,6 +682,7 @@ function renderContent() {
     welcome: renderWelcome,
     'compare-result': renderCompareResult,
     'schema-data': renderSchemaData,
+    'rules': renderRulesEditor,
     'rules': renderRules,
     pipeline: renderPipeline,
     mermaid: renderMermaidView,
@@ -2169,6 +2195,517 @@ function renderAI() {
 }
 
 
+
+// ─── RÈGLES MÉTIER CONFIGURABLES ───────────────────────────
+let businessRules = {}; // { colName: [{type, params, label}] }
+
+function toggleRulesPanel() {
+  const panel = document.getElementById('rules-panel');
+  panel.classList.toggle('hidden');
+  // Peupler le sélecteur de colonnes
+  const sel = document.getElementById('rule-col');
+  const cols = Object.values(dbTables).flatMap(t => t.headers);
+  const unique = [...new Set(cols)].sort();
+  sel.innerHTML = '<option value="">— Colonne —</option>' + unique.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+}
+
+function updateRuleInput() {
+  const type = document.getElementById('rule-type').value;
+  const wrap = document.getElementById('rule-input-wrap');
+  if (type === 'range') {
+    wrap.innerHTML = '<div style="display:flex;gap:4px"><input id="rule-min" placeholder="Min" style="flex:1;font-family:var(--mono);font-size:10px"><input id="rule-max" placeholder="Max" style="flex:1;font-family:var(--mono);font-size:10px"></div>';
+  } else if (type === 'domain') {
+    wrap.innerHTML = '<input id="rule-domain" placeholder="valeur1, valeur2, valeur3..." style="width:100%;font-family:var(--mono);font-size:10px">';
+  } else if (type === 'nullmax') {
+    wrap.innerHTML = '<input id="rule-nullmax" placeholder="Ex: 5 (pour 5% max)" style="width:100%;font-family:var(--mono);font-size:10px">';
+  } else if (type === 'regex') {
+    wrap.innerHTML = '<input id="rule-regex" placeholder="Ex: ^[0-9]{14}$" style="width:100%;font-family:var(--mono);font-size:10px">';
+  }
+}
+
+function addRule() {
+  const col = document.getElementById('rule-col').value;
+  const type = document.getElementById('rule-type').value;
+  if (!col) return;
+
+  let rule = { type, label: '' };
+  if (type === 'range') {
+    const min = document.getElementById('rule-min')?.value.trim();
+    const max = document.getElementById('rule-max')?.value.trim();
+    if (!min && !max) return;
+    rule.min = min ? parseFloat(min) : null;
+    rule.max = max ? parseFloat(max) : null;
+    rule.label = `Bornes [${min||'−∞'} ; ${max||'+∞'}]`;
+  } else if (type === 'domain') {
+    const vals = document.getElementById('rule-domain')?.value.split(',').map(v=>v.trim()).filter(Boolean);
+    if (!vals?.length) return;
+    rule.values = vals;
+    rule.label = `Domaine : ${vals.slice(0,3).join(', ')}${vals.length>3?'…':''}`;
+  } else if (type === 'nullmax') {
+    const pct = parseFloat(document.getElementById('rule-nullmax')?.value);
+    if (isNaN(pct)) return;
+    rule.nullmax = pct;
+    rule.label = `Nulls ≤ ${pct}%`;
+  } else if (type === 'regex') {
+    const pattern = document.getElementById('rule-regex')?.value.trim();
+    if (!pattern) return;
+    rule.pattern = pattern;
+    rule.label = `Format : ${pattern}`;
+  }
+
+  if (!businessRules[col]) businessRules[col] = [];
+  businessRules[col].push(rule);
+  renderRulesList();
+  const btn = document.getElementById('btn-apply-rules');
+  if (btn) btn.style.display = Object.keys(businessRules).length ? 'block' : 'none';
+}
+
+function removeRule(col, idx) {
+  businessRules[col].splice(idx, 1);
+  if (!businessRules[col].length) delete businessRules[col];
+  renderRulesList();
+  const btn = document.getElementById('btn-apply-rules');
+  if (btn) btn.style.display = Object.keys(businessRules).length ? 'block' : 'none';
+}
+
+function renderRulesList() {
+  const el = document.getElementById('rules-list');
+  const entries = Object.entries(businessRules);
+  if (!entries.length) { el.innerHTML = 'Aucune règle définie.'; return; }
+  el.innerHTML = entries.map(([col, rules]) =>
+    rules.map((r, i) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;background:var(--bg1);border-radius:2px;margin-bottom:3px">
+        <div><span style="color:var(--nxl-teal)">${esc(col)}</span> <span style="color:var(--text2)">${esc(r.label)}</span></div>
+        <button onclick="removeRule('${esc(col)}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px">✕</button>
+      </div>`).join('')
+  ).join('');
+}
+
+function exportRules() {
+  const blob = new Blob([JSON.stringify(businessRules, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'regles_metier.json'; a.click();
+}
+
+function importRules(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      businessRules = JSON.parse(e.target.result);
+      renderRulesList();
+    } catch(err) { alert('Fichier JSON invalide'); }
+  };
+  reader.readAsText(file);
+}
+
+// Appliquer les règles métier aux résultats DQ
+function applyBusinessRules(dq, name) {
+  if (!dq?.columns) return dq;
+  const extraIssues = [];
+  dq.columns.forEach(col => {
+    const rules = businessRules[col.name] || [];
+    rules.forEach(rule => {
+      if (rule.type === 'range' && col.stats) {
+        if (rule.min !== null && col.stats.min < rule.min)
+          extraIssues.push({ field: col.name, msg: `Règle métier : min observé (${col.stats.min}) < min autorisé (${rule.min})`, sev: 'high', business: true });
+        if (rule.max !== null && col.stats.max > rule.max)
+          extraIssues.push({ field: col.name, msg: `Règle métier : max observé (${col.stats.max}) > max autorisé (${rule.max})`, sev: 'high', business: true });
+      }
+      if (rule.type === 'domain' && col.stats?.topValues) {
+        const allowed = new Set(rule.values);
+        const observed = col.stats.topValues.map(v => v.value);
+        const invalid = observed.filter(v => !allowed.has(v));
+        if (invalid.length)
+          extraIssues.push({ field: col.name, msg: `Règle métier : valeur(s) hors domaine : ${invalid.slice(0,3).join(', ')}`, sev: 'high', business: true });
+      }
+      if (rule.type === 'nullmax') {
+        const nullPct = col.nullCount / (dq.rowCount || 1) * 100;
+        if (nullPct > rule.nullmax)
+          extraIssues.push({ field: col.name, msg: `Règle métier : ${Math.round(nullPct)}% de nulls > seuil autorisé (${rule.nullmax}%)`, sev: 'high', business: true });
+      }
+      if (rule.type === 'regex' && col.stats?.topValues) {
+        try {
+          const re = new RegExp(rule.pattern);
+          const invalid = col.stats.topValues.filter(v => !re.test(v.value)).length;
+          if (invalid)
+            extraIssues.push({ field: col.name, msg: `Règle métier : format non conforme (${invalid} valeur(s) testées)`, sev: 'medium', business: true });
+        } catch(e) {}
+      }
+    });
+  });
+  if (extraIssues.length) {
+    dq.issues = [...extraIssues, ...(dq.issues || [])];
+    dq.businessIssues = extraIssues.length;
+  }
+  return dq;
+}
+
+
+
+// ─── RÈGLES MÉTIER ───────────────────────────────────────
+function toggleRulesPanel() {
+  const p = document.getElementById('rules-panel');
+  p.classList.toggle('hidden');
+}
+
+function addRule() {
+  const col = document.getElementById('rule-col').value.trim();
+  if (!col) return;
+  const min = document.getElementById('rule-min').value.trim();
+  const max = document.getElementById('rule-max').value.trim();
+  const domain = document.getElementById('rule-domain').value.trim();
+  const nullmax = document.getElementById('rule-nullmax').value.trim();
+  const regex = document.getElementById('rule-regex').value.trim();
+
+  businessRules[col] = {};
+  if (min !== '') businessRules[col].min = parseFloat(min);
+  if (max !== '') businessRules[col].max = parseFloat(max);
+  if (domain !== '') businessRules[col].allowedValues = domain.split(',').map(v=>v.trim()).filter(Boolean);
+  if (nullmax !== '') businessRules[col].maxNullPct = parseFloat(nullmax);
+  if (regex !== '') businessRules[col].regex = regex;
+
+  // Reset inputs
+  ['rule-col','rule-min','rule-max','rule-domain','rule-nullmax','rule-regex'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+
+  renderRulesList();
+  const btn = document.getElementById('btn-apply-rules');
+  if (btn) btn.style.display = Object.keys(businessRules).length ? 'block' : 'none';
+}
+
+function removeRule(col) {
+  delete businessRules[col];
+  renderRulesList();
+  const btn = document.getElementById('btn-apply-rules');
+  if (btn) btn.style.display = Object.keys(businessRules).length ? 'block' : 'none';
+}
+
+function renderRulesList() {
+  const el = document.getElementById('rules-list');
+  const cols = Object.keys(businessRules);
+  if (!cols.length) { el.innerHTML = 'Aucune règle définie'; return; }
+  el.innerHTML = cols.map(col => {
+    const r = businessRules[col];
+    const parts = [];
+    if (r.min !== undefined) parts.push(`min:${r.min}`);
+    if (r.max !== undefined) parts.push(`max:${r.max}`);
+    if (r.allowedValues) parts.push(`domaine:[${r.allowedValues.slice(0,3).join(',')}${r.allowedValues.length>3?'…':''}]`);
+    if (r.maxNullPct !== undefined) parts.push(`nulls≤${r.maxNullPct}%`);
+    if (r.regex) parts.push(`regex`);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span><span style="color:var(--nxl-teal);font-weight:700">${esc(col)}</span> — ${parts.join(', ')}</span>
+      <span style="cursor:pointer;color:var(--red)" onclick="removeRule('${esc(col)}')">✕</span>
+    </div>`;
+  }).join('');
+}
+
+function importRulesFile() {
+  document.getElementById('rules-file-input').click();
+}
+
+function loadRulesFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      Object.assign(businessRules, imported);
+      renderRulesList();
+      showStatus('dq', `✓ ${Object.keys(imported).length} règle(s) importée(s)`);
+    } catch(err) {
+      showStatus('dq', 'Erreur import règles JSON', true);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function applyBusinessRules(colProfile, dqResult) {
+  // Appliquer les règles métier sur un profil de colonne existant
+  const rule = businessRules[colProfile.name];
+  if (!rule) return colProfile;
+
+  const extraIssues = [];
+
+  // Borne min
+  if (rule.min !== undefined && colProfile.stats?.min !== undefined) {
+    if (colProfile.stats.min < rule.min) {
+      extraIssues.push({ field: colProfile.name,
+        msg: `Valeur min ${colProfile.stats.min} < borne métier ${rule.min}`, sev: 'high' });
+    }
+  }
+  // Borne max
+  if (rule.max !== undefined && colProfile.stats?.max !== undefined) {
+    if (colProfile.stats.max > rule.max) {
+      extraIssues.push({ field: colProfile.name,
+        msg: `Valeur max ${colProfile.stats.max} > borne métier ${rule.max}`, sev: 'high' });
+    }
+  }
+  // Domaine autorisé
+  if (rule.allowedValues?.length && colProfile.stats?.topValues) {
+    const allowed = new Set(rule.allowedValues);
+    const invalid = colProfile.stats.topValues
+      .filter(tv => !allowed.has(String(tv.value)))
+      .map(tv => tv.value).slice(0, 3);
+    if (invalid.length) {
+      extraIssues.push({ field: colProfile.name,
+        msg: `Valeurs hors domaine autorisé : ${invalid.join(', ')}`, sev: 'high' });
+    }
+  }
+  // Nulls max
+  if (rule.maxNullPct !== undefined) {
+    const actualNullPct = colProfile.total > 0
+      ? (colProfile.nullCount / colProfile.total * 100) : 0;
+    if (actualNullPct > rule.maxNullPct) {
+      extraIssues.push({ field: colProfile.name,
+        msg: `Taux de nulls ${Math.round(actualNullPct*10)/10}% > seuil métier ${rule.maxNullPct}%`, sev: 'critical' });
+    }
+  }
+  // Regex
+  if (rule.regex && colProfile.stats?.topValues) {
+    try {
+      const re = new RegExp(rule.regex);
+      const invalid = colProfile.stats.topValues
+        .filter(tv => !re.test(String(tv.value)))
+        .map(tv => tv.value).slice(0, 3);
+      if (invalid.length) {
+        extraIssues.push({ field: colProfile.name,
+          msg: `Format invalide (regex: ${rule.regex}) : ${invalid.join(', ')}`, sev: 'medium' });
+      }
+    } catch(e) {}
+  }
+
+  if (extraIssues.length) {
+    return { ...colProfile, issues: [...colProfile.issues, ...extraIssues] };
+  }
+  return colProfile;
+}
+
+function applyAllBusinessRules() {
+  // Ré-appliquer toutes les règles métier sur les résultats DQ existants
+  if (!Object.keys(businessRules).length) return;
+  Object.keys(dqResults).filter(k=>k!=='__compare__').forEach(name => {
+    const dq = dqResults[name];
+    if (!dq?.columns) return;
+    dq.columns = dq.columns.map(col => applyBusinessRules(col, dq));
+    dq.issues = dq.columns.flatMap(c => c.issues);
+  });
+  buildTabs();
+  renderContent();
+  showStatus('dq', `✓ Règles métier appliquées sur ${Object.keys(dqResults).filter(k=>k!=='__compare__').length} table(s)`);
+}
+
+
+
+// ─── RÈGLES MÉTIER CONFIGURABLES ───────────────────────────
+let businessRules = {}; // { colName: { min, max, maxNullPct, allowed, regex } }
+
+function renderRulesEditor() {
+  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  if (!names.length) return '<div class="notice notice-amber">Aucune table profilée.</div>';
+
+  // Récupérer toutes les colonnes de toutes les tables
+  const allCols = [];
+  names.forEach(name => {
+    (dqResults[name]?.columns || []).forEach(col => {
+      allCols.push({ table: name, col });
+    });
+  });
+
+  let html = `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text2)">
+      Définissez des règles métier par colonne. Elles seront vérifiées et apparaîtront dans les anomalies.
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" onclick="importRulesFromJSON()" title="Importer JSON">⬆ Importer</button>
+      <button class="btn btn-ghost" onclick="exportRulesToJSON()" title="Exporter JSON">⬇ Exporter</button>
+      <button class="btn btn-primary" onclick="applyRules()">▶ Appliquer les règles</button>
+    </div>
+  </div>
+  <div style="margin-bottom:12px;padding:10px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:3px;font-size:10px;color:var(--text2)">
+    <strong style="color:var(--text1)">Format JSON attendu :</strong>
+    <code style="font-family:var(--mono);color:var(--nxl-teal)"> { "NOM_COLONNE": { "min": 0, "max": 1, "maxNullPct": 5, "allowed": ["A","B"], "regex": "^[0-9]+$" } }</code>
+  </div>
+  <table class="tbl">
+    <thead><tr>
+      <th>Table</th><th>Colonne</th><th>Type</th>
+      <th>Min</th><th>Max</th><th>Nulls max %</th><th>Valeurs autorisées</th><th>Regex</th>
+      <th></th>
+    </tr></thead>
+    <tbody id="rules-tbody">`;
+
+  allCols.forEach(({ table, col }) => {
+    const key = col.name;
+    const r = businessRules[key] || {};
+    const safeKey = esc(key);
+    html += `<tr id="rule-row-${safeKey}">
+      <td style="font-size:10px;color:var(--text2)">${esc(table)}</td>
+      <td style="font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--text0)">${safeKey}</td>
+      <td style="font-size:10px;color:var(--text2)">${col.type||'?'}</td>
+      <td><input type="number" step="any" placeholder="—" value="${r.min??''}" 
+          style="width:70px;font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border2);color:var(--text0);border-radius:2px;padding:3px 6px"
+          oninput="setRule('${safeKey}','min',this.value)"></td>
+      <td><input type="number" step="any" placeholder="—" value="${r.max??''}"
+          style="width:70px;font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border2);color:var(--text0);border-radius:2px;padding:3px 6px"
+          oninput="setRule('${safeKey}','max',this.value)"></td>
+      <td><input type="number" min="0" max="100" step="0.1" placeholder="—" value="${r.maxNullPct??''}"
+          style="width:60px;font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border2);color:var(--text0);border-radius:2px;padding:3px 6px"
+          oninput="setRule('${safeKey}','maxNullPct',this.value)"></td>
+      <td><input type="text" placeholder="A, B, C" value="${esc((r.allowed||[]).join(', '))}"
+          style="width:120px;font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border2);color:var(--text0);border-radius:2px;padding:3px 6px"
+          oninput="setRule('${safeKey}','allowed',this.value)"></td>
+      <td><input type="text" placeholder="^[0-9]+$" value="${esc(r.regex||'')}"
+          style="width:110px;font-family:var(--mono);font-size:10px;background:var(--bg2);border:1px solid var(--border2);color:var(--text0);border-radius:2px;padding:3px 6px"
+          oninput="setRule('${safeKey}','regex',this.value)"></td>
+      <td><button class="btn btn-ghost" style="font-size:9px;padding:2px 6px" 
+          onclick="clearRule('${safeKey}')">✕</button></td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>
+  <div id="rules-status" style="margin-top:10px;font-size:11px;display:none"></div>`;
+
+  return html;
+}
+
+function setRule(col, field, value) {
+  if (!businessRules[col]) businessRules[col] = {};
+  if (value === '' || value === null) {
+    delete businessRules[col][field];
+  } else if (field === 'allowed') {
+    businessRules[col][field] = value.split(',').map(v => v.trim()).filter(Boolean);
+  } else if (field === 'regex') {
+    businessRules[col][field] = value;
+  } else {
+    businessRules[col][field] = parseFloat(value);
+  }
+  // Nettoyer si vide
+  if (Object.keys(businessRules[col]).length === 0) delete businessRules[col];
+}
+
+function clearRule(col) {
+  delete businessRules[col];
+  setTab('rules', null);
+}
+
+function exportRulesToJSON() {
+  const json = JSON.stringify(businessRules, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'regles_metier.json';
+  a.click();
+}
+
+function importRulesFromJSON() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (typeof parsed !== 'object') throw new Error('Format invalide');
+        businessRules = parsed;
+        setTab('rules', null);
+        showStatus('dq', `✓ ${Object.keys(parsed).length} règles importées`);
+      } catch(err) {
+        showStatus('dq', 'Erreur import JSON : ' + err.message, true);
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+function applyRules() {
+  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
+  let totalViolations = 0;
+
+  names.forEach(name => {
+    const dq = dqResults[name];
+    if (!dq?.columns) return;
+    const table = dbTables[name];
+
+    dq.columns.forEach(col => {
+      const rule = businessRules[col.name];
+      if (!rule) return;
+
+      // Retirer les anciennes violations métier
+      col.issues = col.issues.filter(i => !i.business);
+
+      const rows = table?.rows || [];
+      const vals = rows.map(r => r[col.name]).filter(v => v !== null && v !== undefined && String(v).trim() !== '');
+
+      // Règle : bornes numériques
+      if (rule.min !== undefined || rule.max !== undefined) {
+        const nums = vals.map(v => parseFloat(String(v).replace(/,/g, '.'))).filter(v => !isNaN(v));
+        if (nums.length) {
+          if (rule.min !== undefined) {
+            const below = nums.filter(v => v < rule.min).length;
+            if (below > 0) {
+              col.issues.push({ field: col.name, msg: `${below} valeur${below>1?'s':''} sous le minimum autorisé (${rule.min})`, sev: 'high', business: true });
+              totalViolations++;
+            }
+          }
+          if (rule.max !== undefined) {
+            const above = nums.filter(v => v > rule.max).length;
+            if (above > 0) {
+              col.issues.push({ field: col.name, msg: `${above} valeur${above>1?'s':''} au-dessus du maximum autorisé (${rule.max})`, sev: 'high', business: true });
+              totalViolations++;
+            }
+          }
+        }
+      }
+
+      // Règle : taux de nulls max
+      if (rule.maxNullPct !== undefined) {
+        const actualPct = col.nullCount / (col.total || 1) * 100;
+        if (actualPct > rule.maxNullPct) {
+          col.issues.push({ field: col.name, msg: `Taux de nulls ${Math.round(actualPct*10)/10}% dépasse le seuil autorisé (${rule.maxNullPct}%)`, sev: actualPct > rule.maxNullPct * 2 ? 'critical' : 'high', business: true });
+          totalViolations++;
+        }
+      }
+
+      // Règle : domaines autorisés
+      if (rule.allowed?.length) {
+        const allowed = new Set(rule.allowed.map(v => String(v).trim().toLowerCase()));
+        const invalid = vals.filter(v => !allowed.has(String(v).trim().toLowerCase()));
+        if (invalid.length) {
+          const sample = [...new Set(invalid)].slice(0, 3).join(', ');
+          col.issues.push({ field: col.name, msg: `${invalid.length} valeur${invalid.length>1?'s':''} hors domaine autorisé. Ex: ${sample}`, sev: 'high', business: true });
+          totalViolations++;
+        }
+      }
+
+      // Règle : regex
+      if (rule.regex) {
+        try {
+          const re = new RegExp(rule.regex);
+          const invalid = vals.filter(v => !re.test(String(v)));
+          if (invalid.length) {
+            col.issues.push({ field: col.name, msg: `${invalid.length} valeur${invalid.length>1?'s':''} ne respectent pas le format attendu (${rule.regex})`, sev: 'medium', business: true });
+            totalViolations++;
+          }
+        } catch(e) { /* regex invalide */ }
+      }
+    });
+
+    // Recalculer allIssues
+    dq.issues = dq.columns.flatMap(c => c.issues);
+  });
+
+  buildTabs();
+  setTab('issues', null);
+  showStatus('dq', `✓ Règles appliquées — ${totalViolations} violation${totalViolations>1?'s':''} détectée${totalViolations>1?'s':''}`);
+}
+
+
 // ─── SCHÉMA MERMAID MODE DONNÉES ───────────────────────────
 function renderSchemaData() {
   const names = Object.keys(dqResults).filter(k => k !== '__compare__');
@@ -2812,6 +3349,7 @@ function showMermaidStep(tableId) {
 // ─── COMPARISON MODE ───────────────────────────────
 // ═══════════════════════════════════════════════════
 let cmpData = { a: null, b: null };
+let businessRules = {}; // { colName: { min, max, allowedValues, maxNullPct, regex } }
 let compareResult = null;
 
 function loadCompareFile(side, file) {
