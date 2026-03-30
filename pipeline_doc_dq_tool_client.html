@@ -76,7 +76,7 @@
 body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:14px;min-height:100vh;overflow-x:hidden}
 
 /* ─── SHELL ─── */
-.shell{display:grid;grid-template-rows:58px auto 1fr;height:100vh}
+.shell{display:grid;grid-template-rows:58px 1fr;height:100vh}
 .topbar{
   background:#002060;
   border-bottom:1px solid #001548;
@@ -373,8 +373,8 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
 #mermaid-container .cluster rect{fill:var(--bg2)!important;stroke:var(--nxl-steel)!important}
 
 /* ─── API KEY BANNER ─── */
-#apikey-bar{background:#002060;border-bottom:2px solid #B10031;padding:10px 24px;display:flex;align-items:center;gap:12px;flex-shrink:0}
-#apikey-bar.hidden{display:none}
+
+
 
 
 
@@ -407,7 +407,7 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
     </div>
   </div>
   <div style="display:flex;gap:8px;align-items:center;position:relative;z-index:1">
-    <button id="ak-open-btn" onclick="openKeyBar()" style="background:rgba(177,0,49,.15);border:1px solid rgba(177,0,49,.4);border-radius:3px;color:#B10031;font-family:var(--title);font-size:8.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:5px 10px;cursor:pointer;display:none">⚿ Clé API</button><span style="font-family:var(--title);font-size:8.5px;font-weight:600;color:var(--nxl-steel);letter-spacing:.12em;text-transform:uppercase">Think Smart · Act Different</span>
+    <span style="font-family:var(--title);font-size:8.5px;font-weight:600;color:var(--nxl-steel);letter-spacing:.12em;text-transform:uppercase">Think Smart · Act Different</span>
   </div>
 </div>
 
@@ -2272,8 +2272,6 @@ function buildHeaders() {
 
 
 function openKeyBar() {
-  document.getElementById('apikey-bar').classList.remove('hidden');
-  document.getElementById('ak-open-btn').style.display = 'none';
   document.getElementById('ak-input').focus();
 }
 
@@ -2282,15 +2280,12 @@ function openKeyBar() {
   const saved = '';
   if (saved) {
     document.getElementById('ak-input').value = saved;
-    document.getElementById('ak-open-btn').style.display = 'inline-block';
     setAkStatus('✓ Clé chargée', true);
   } else {
     // No key and not on claude.ai proxy → show banner
     const needsKey = !window.location.hostname.includes('claude.ai') && window.location.protocol !== 'blob:';
     if (needsKey) {
-      document.getElementById('apikey-bar').classList.remove('hidden');
     } else {
-      document.getElementById('ak-open-btn').style.display = 'inline-block';
     }
   }
 })();
