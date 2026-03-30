@@ -7,22 +7,34 @@
 <!-- Montserrat (titres) + JetBrains Mono (code) — Segoe UI via system stack -->
 <!-- Fonts : system-ui fallback si Google Fonts non disponible (environnement hors-ligne) -->
 <!-- Librairies JS : chargées localement si dispo (mode hors-ligne banque), sinon CDN -->
+<!-- Pour désactiver le fallback CDN (environnement strict) :
+     ajouter <meta name="offline-strict" content="true"> dans le <head> -->
 <script>
 (function() {
+  const offlineStrict = !!document.querySelector('meta[name="offline-strict"]');
   const libs = [
     { local: '/static/papaparse.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js' },
     { local: '/static/xlsx.full.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js' },
     { local: '/static/mermaid.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js' },
     { local: '/static/jspdf.umd.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js' },
   ];
-  // Tenter le chargement local d'abord, fallback CDN si échec
   function loadScript(src, fallback) {
     const s = document.createElement('script');
     s.src = src;
-    s.onerror = fallback ? () => { const f = document.createElement('script'); f.src = fallback; document.head.appendChild(f); } : null;
+    // Fallback CDN uniquement si pas en mode strict
+    if (!offlineStrict && fallback) {
+      s.onerror = () => {
+        const f = document.createElement('script');
+        f.src = fallback;
+        f.onerror = () => console.warn('[NXL] Lib non disponible localement ni sur CDN :', fallback);
+        document.head.appendChild(f);
+      };
+    } else if (offlineStrict) {
+      s.onerror = () => console.error('[NXL] Mode strict offline : lib manquante :', src, '— lancez download_libs.py');
+    }
     document.head.appendChild(s);
   }
-  libs.forEach(l => loadScript(l.local, l.cdn));
+  libs.forEach(l => loadScript(l.local, offlineStrict ? null : l.cdn));
 })();
 </script>
 <style>
@@ -2270,7 +2282,24 @@ function esc(s) {
 // ── MODE CLIENT BANQUE — PROXY UNIQUEMENT ──
 // Toutes les requêtes IA passent par le backend proxy.
 // Aucun appel direct à Anthropic depuis le navigateur.
-const PROXY_URL = 'http://localhost:8000';
+//
+// PROXY_URL : configurable via <meta name="proxy-url" content="http://monserveur:8000">
+//             ou via window.NXL_PROXY_URL avant le chargement du script.
+//             Par défaut : même origine (URL relative) si déployé sur le serveur,
+//             sinon localhost:8000 pour le développement local.
+const PROXY_URL = (function() {
+  if (window.NXL_PROXY_URL) return window.NXL_PROXY_URL;
+  const meta = document.querySelector('meta[name="proxy-url"]');
+  if (meta) return meta.getAttribute('content');
+  // URL relative si servi par le proxy lui-même, sinon fallback localhost
+  if (window.location.hostname !== '127.0.0.1' &&
+      window.location.hostname !== 'localhost' &&
+      !window.location.hostname.includes('github.io')) {
+    return window.location.origin; // déployé sur le serveur → URL relative
+  }
+  return 'http://localhost:8000'; // développement local
+})();
+
 const PROXY_ACCESS_TOKEN = ''; // Optionnel — doit correspondre à ACCESS_TOKEN sur le serveur
 
 function getApiUrl() {
