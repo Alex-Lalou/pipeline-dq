@@ -1027,10 +1027,12 @@ function parseFile(file) {
         const validityAvg     = colProfiles.reduce((s,c)=>s+c.validity,0)/colProfiles.length;
         const overallScore    = completenessAvg*0.5 + validityAvg*0.5; // Unicité exclue du score global (biais catégoriel)
 
+        const _sampleSize = reservoirRows.length;
+        const _sampled = _sampleSize < totalRows;
         dqResults[name] = {
           overallScore, completeness:completenessAvg, uniqueness:uniquenessAvg, validity:validityAvg,
-          rowCount:totalRows, sampled, sampleSize:sampleN, colCount:headers.length, columns:colProfiles, issues:allIssues,
-          sampled:true, sampleSize:reservoirRows.length, streaming:true
+          rowCount:totalRows, sampled:_sampled, sampleSize:_sampleSize,
+          colCount:headers.length, columns:colProfiles, issues:allIssues, streaming:true
         };
 
         // Store only the reservoir for optional further use
@@ -1142,28 +1144,36 @@ function storeTable(name, rows, headers) {
   dbTables[name] = { rows, headers, rowCount: rows.length };
   renderTableList();
   document.getElementById('btn-dq').disabled = false;
-  // Auto-profil immédiat pour comportement uniforme CSV/Excel
-  // On lance runFullDQ de façon ciblée sur cette table
-  setTimeout(() => {
-    const t = dbTables[name];
-    if (!t) return;
-    // rowCount = volume réel du fichier (préservé même si rows = réservoir)
-    // rows peut être un réservoir de 50k lignes pour les gros CSV
-    const totalRows = t.rowCount;
-    const sampleN = Math.min(t.rows.length, 50000);
-    const sampled = sampleN < totalRows;
-    const sampleRows = t.rows.slice(0, sampleN);
-    const colProfiles = t.headers.map(h => profileColumn(sampleRows, h, sampleN, totalRows));
-    const allIssues = colProfiles.flatMap(c => c.issues);
-    const completenessAvg = colProfiles.reduce((s,c)=>s+c.completeness,0)/colProfiles.length;
-    const uniquenessAvg   = colProfiles.reduce((s,c)=>s+c.uniqueness,0)/colProfiles.length;
-    const validityAvg     = colProfiles.reduce((s,c)=>s+c.validity,0)/colProfiles.length;
-    const overallScore    = completenessAvg*0.5 + validityAvg*0.5;
-    dqResults[name] = { overallScore, completeness:completenessAvg, uniqueness:uniquenessAvg, validity:validityAvg, rowCount:totalRows, colCount:t.headers.length, columns:colProfiles, issues:allIssues, sampled: sampleN < totalRows, sampleSize:sampleN };
-    renderTableList();
-    buildTabs();
-    if (activeTab === 'welcome' || !codeData) setTab('dq-data', null);
-  }, 50);
+  // Lancer le profiling via le worker (seul endroit où profileColumn est définie)
+  setTimeout(() => runFullDQForTable(name), 50);
+}
+
+function runFullDQForTable(name) {
+  const t = dbTables[name];
+  if (!t) return;
+  const sampleSize = parseInt(document.getElementById('sample-size-input')?.value || '50000');
+  const tables = [{
+    name,
+    rows: t.rows,
+    headers: t.headers,
+    rowCount: t.rowCount,
+    alreadySampled: !!t.streaming
+  }];
+  const blob = new Blob([WORKER_CODE], { type: 'application/javascript' });
+  const workerUrl = URL.createObjectURL(blob);
+  const w = new Worker(workerUrl);
+  w.onmessage = (e) => {
+    if (e.data.type === 'done') {
+      w.terminate();
+      URL.revokeObjectURL(workerUrl);
+      Object.assign(dqResults, e.data.results);
+      renderTableList();
+      buildTabs();
+      if (activeTab === 'welcome' || activeTab === 'dq-data') setTab('dq-data', null);
+    }
+  };
+  w.onerror = (e) => { w.terminate(); URL.revokeObjectURL(workerUrl); };
+  w.postMessage({ tables, sampleSize });
 }
 
 function removeTable(name) {
@@ -1308,17 +1318,20 @@ self.onmessage = function(e) {
   const { tables, sampleSize } = e.data;
   const results = {};
 
-  tables.forEach(({ name, rows, headers }) => {
-    const totalRows = rows.length;
-    const sampled = totalRows > sampleSize;
+  tables.forEach((table) => {
+    const { name, rows, headers } = table;
+    const totalRows = table.rowCount ?? rows.length;   // rowCount réel du fichier
+    const alreadySampled = !!table.alreadySampled;     // true si CSV déjà réduit au réservoir
+    // Si déjà échantillonné (CSV streaming), on ne ré-échantillonne pas
+    const sampled = alreadySampled || totalRows > sampleSize;
 
-    // Sampling: stratified random sample
+    // Sampling: stratified random sample (seulement si pas déjà fait)
     let sampleRows;
-    if (sampled) {
-      const step = totalRows / sampleSize;
+    if (!alreadySampled && totalRows > sampleSize) {
+      const step = rows.length / sampleSize;
       sampleRows = [];
       for (let i = 0; i < sampleSize; i++) {
-        sampleRows.push(rows[Math.min(Math.floor(i * step), totalRows - 1)]);
+        sampleRows.push(rows[Math.min(Math.floor(i * step), rows.length - 1)]);
       }
     } else {
       sampleRows = rows;
@@ -1361,11 +1374,13 @@ function runFullDQ() {
   document.getElementById('progress-detail').textContent = '';
   setBtnLoad('btn-dq', 'dq-spin', 'dq-lbl', 'Analyse en cours…');
 
-  // Build table payload for worker (just rows + headers)
+  // Build table payload for worker — passer rowCount réel et flag streaming
   const tables = names.map(name => ({
     name,
     rows: dbTables[name].rows,
-    headers: dbTables[name].headers
+    headers: dbTables[name].headers,
+    rowCount: dbTables[name].rowCount,       // volume réel du fichier original
+    alreadySampled: !!dbTables[name].streaming // true si CSV déjà réduit au réservoir
   }));
 
   // Total columns across all tables for global progress
