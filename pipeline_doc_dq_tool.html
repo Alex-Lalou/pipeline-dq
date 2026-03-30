@@ -745,7 +745,24 @@ JSON attendu (sans markdown):
     const apiRes = await resp.json();
     let raw = (apiRes.content?.[0]?.text||'').replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/\s*```$/,'').trim();
     const m = raw.match(/\{[\s\S]*\}/); if(m) raw = m[0];
-    codeData = JSON.parse(raw);
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch(pe) { throw new Error('Réponse non parseable — réessayez.'); }
+    if (!parsed || !Array.isArray(parsed.tables)) throw new Error('Structure JSON invalide — réessayez.');
+    // Nettoyer et valider chaque table
+    parsed.tables = parsed.tables.map(t => ({
+      ...t,
+      id: String(t.id||'TABLE').slice(0,60),
+      type: ['source','intermediate','master','final'].includes(t.type)?t.type:'intermediate',
+      short: String(t.short||'').slice(0,100),
+      desc: String(t.desc||'').slice(0,500),
+      sources: Array.isArray(t.sources)?t.sources.map(s=>String(s).slice(0,60)):[],
+      filters: Array.isArray(t.filters)?t.filters.map(f=>String(f).slice(0,200)):[],
+      added_columns: Array.isArray(t.added_columns)?t.added_columns:[],
+      columns: Array.isArray(t.columns)?t.columns:[],
+      dq: t.dq&&typeof t.dq==='object'?t.dq:null,
+    }));
+    codeData = parsed;
     selCodeNode = null;
     clearInterval(timer);
     document.getElementById('code-prog-fill').style.width = '100%';
@@ -987,12 +1004,14 @@ function parseFile(file) {
 
           if (a.nullCount > 0) {
             const pct = a.nullCount/totalRows*100;
-            if (pct>=50) issues.push({field:h,msg:`${Math.round(pct)}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:'critical'});
-            else if (pct>=20) issues.push({field:h,msg:`${Math.round(pct)}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:'high'});
-            else if (pct>=5)  issues.push({field:h,msg:`${Math.round(pct)}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:'medium'});
-            else              issues.push({field:h,msg:`${Math.round(pct*10)/10}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:'low'});
+            const _isCrit = /^id_|_id$|^pk_|identif|^key_/i.test(h);
+            const _sev = (b) => _isCrit ? {low:'medium',medium:'high',high:'critical',critical:'critical'}[b] : b;
+            if (pct>=50) issues.push({field:h,msg:`${Math.round(pct)}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:_sev('critical')});
+            else if (pct>=20) issues.push({field:h,msg:`${Math.round(pct)}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:_sev('high')});
+            else if (pct>=5)  issues.push({field:h,msg:`${Math.round(pct)}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:_sev('medium')});
+            else              issues.push({field:h,msg:`${Math.round(pct*10)/10}% de valeurs manquantes (${a.nullCount.toLocaleString()})`,sev:_sev('low')});
           }
-          if (distinctSize <= 1 && nonNull > 0) issues.push({field:h,msg:'Colonne constante',sev:'medium'});
+          if (distinctSize <= 1 && nonNull > 0) issues.push({field:h,msg:'Colonne constante (peut être normal : date arrêté, code source)',sev:'low'});
 
           return {
             name:h, type:a.type, completeness:Math.round(completeness*100)/100,
@@ -1273,7 +1292,9 @@ function profileColumn(rows, header, total, totalRows){
 
   if(nullCount>0){
     const pct=nullCount/total*100;
-    if(pct>=50)issues.push({field:header,msg:Math.round(pct)+'% de valeurs manquantes ('+nullCount.toLocaleString()+' lignes)',sev:'critical'});
+    const _isCritF = /^id_|_id$|^pk_|identif|^key_/i.test(header);
+    const _sevF = (b) => _isCritF ? {low:'medium',medium:'high',high:'critical',critical:'critical'}[b] : b;
+    if(pct>=50)issues.push({field:header,msg:Math.round(pct)+'% de valeurs manquantes ('+nullCount.toLocaleString()+' lignes)',sev:_sevF('critical')});
     else if(pct>=20)issues.push({field:header,msg:Math.round(pct)+'% de valeurs manquantes ('+nullCount.toLocaleString()+' lignes)',sev:'high'});
     else if(pct>=5)issues.push({field:header,msg:Math.round(pct)+'% de valeurs manquantes ('+nullCount.toLocaleString()+' lignes)',sev:'medium'});
     else if(pct>0)issues.push({field:header,msg:Math.round(pct*10)/10+'% de valeurs manquantes ('+nullCount.toLocaleString()+' lignes)',sev:'low'});
@@ -1869,7 +1890,8 @@ function exportPDF() {
     doc.setFont('helvetica','bold');
     doc.setFontSize(9);
     doc.setTextColor(...NAVY);
-    doc.text('PROFIL PAR COLONNE', margin, y);
+    const sampledLabel = dq.sampled ? ` (échantillon ${(dq.sampleSize||0).toLocaleString()} lignes)` : '';
+    doc.text('PROFIL PAR COLONNE' + sampledLabel, margin, y);
     y += 5;
 
     // Header table
