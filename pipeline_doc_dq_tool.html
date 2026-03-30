@@ -1818,7 +1818,7 @@ function exportExcel() {
 }
 
 function exportPDF() {
-  const names = Object.keys(dqResults);
+  const names = Object.keys(dqResults).filter(k => k !== '__compare__');
   if (!names.length) return;
 
   const { jsPDF } = window.jspdf;
@@ -1826,177 +1826,257 @@ function exportPDF() {
   const W = 210, margin = 18, contentW = W - margin*2;
   let y = 0;
 
-  const RED = [177, 0, 49], NAVY = [0, 32, 96], TEAL = [64, 154, 187];
-  const DARK = [16, 19, 26], MID = [30, 36, 51], LIGHT = [208, 209, 212];
+  const RED=[177,0,49], NAVY=[0,32,96], TEAL=[64,154,187];
+  const GREEN=[26,158,106], AMBER=[224,138,32], LIGHT=[208,209,212];
+  const BG2=[22,27,37], BG3=[30,36,51];
 
   const checkPage = (needed=10) => {
-    if (y + needed > 280) { doc.addPage(); y = 20; }
+    if (y + needed > 280) {
+      doc.addPage(); y = 0;
+      renderHeader();
+    }
   };
 
-  names.forEach((name, tableIdx) => {
-    const dq = dqResults[name];
-    if (tableIdx > 0) { doc.addPage(); y = 0; }
+  const scoreCol = s => s>=90?GREEN:s>=70?AMBER:RED;
+  const pctCol = v => v>=95?GREEN:v>=80?AMBER:RED;
 
-    // ── HEADER ──
-    doc.setFillColor(...NAVY);
-    doc.rect(0, 0, W, 28, 'F');
-    doc.setFillColor(...RED);
-    doc.rect(0, 0, 4, 28, 'F');
-    doc.setTextColor(255,255,255);
-    doc.setFont('helvetica','bold');
-    doc.setFontSize(13);
-    doc.text('NEXIALOG CONSULTING', margin, 11);
-    doc.setFont('helvetica','normal');
-    doc.setFontSize(8);
-    doc.setTextColor(...LIGHT);
-    doc.text('Rapport Data Quality — Pipeline Doc + DQ Analyzer', margin, 17);
-    doc.text(new Date().toLocaleDateString('fr-FR', {day:'2-digit',month:'long',year:'numeric'}), W-margin, 17, {align:'right'});
-    y = 36;
+  function renderHeader() {
+    doc.setFillColor(...NAVY); doc.rect(0,0,W,12,'F');
+    doc.setFillColor(...RED); doc.rect(0,0,3,12,'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(255,255,255);
+    doc.text('NEXIALOG CONSULTING', margin, 8);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...LIGHT);
+    doc.text('Rapport Data Quality', W-margin, 8, {align:'right'});
+  }
 
-    // ── TABLE NAME ──
-    doc.setFont('helvetica','bold');
-    doc.setFontSize(14);
-    doc.setTextColor(...NAVY);
-    doc.text(name, margin, y);
-    y += 5;
-    doc.setFillColor(...RED);
-    doc.rect(margin, y, 30, 0.8, 'F');
-    y += 8;
+  // ── PAGE DE GARDE ──
+  doc.setFillColor(...NAVY); doc.rect(0,0,W,297,'F');
+  doc.setFillColor(...RED); doc.rect(0,0,6,297,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(26); doc.setTextColor(255,255,255);
+  doc.text('NEXIA', margin+8, 60);
+  doc.setTextColor(...RED);
+  doc.text('LOG', margin+8+doc.getTextWidth('NEXIA'), 60);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...LIGHT);
+  doc.text('CONSULTING', margin+8, 68);
 
-    // ── SCORE HERO ──
-    const score = Math.round(dq.overallScore);
-    const scoreColor = score>=90?[26,158,106]:score>=70?[224,138,32]:RED;
+  doc.setFillColor(...BG2); doc.roundedRect(margin+6,90,contentW-6,48,3,3,'F');
+  doc.setFillColor(...RED); doc.rect(margin+6,90,3,48,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(255,255,255);
+  doc.text('Rapport Data Quality', margin+14, 107);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(...LIGHT);
+  doc.text('Pipeline Doc + DQ Analyzer', margin+14, 115);
+  doc.setTextColor(...TEAL);
+  doc.text(new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}), margin+14, 124);
 
-    doc.setFillColor(22,27,37);
-    doc.roundedRect(margin, y, contentW, 22, 2, 2, 'F');
-    doc.setFont('helvetica','bold');
-    doc.setFontSize(22);
-    doc.setTextColor(...scoreColor);
-    doc.text(score+'%', margin+8, y+14);
-    doc.setFont('helvetica','normal');
-    doc.setFontSize(8);
-    doc.setTextColor(...LIGHT);
-    doc.text('Score qualité global', margin+22, y+7);
-    doc.text(dq.rowCount.toLocaleString()+' lignes · '+dq.colCount+' colonnes', margin+22, y+13);
+  const totalTables = names.length;
+  const totalCols = names.reduce((s,n)=>s+(dqResults[n]?.colCount||0),0);
+  const totalRows = names.reduce((s,n)=>s+(dqResults[n]?.rowCount||0),0);
+  const avgScore = Math.round(names.reduce((s,n)=>s+(dqResults[n]?.overallScore||0),0)/totalTables);
+  const totalIssues = names.reduce((s,n)=>s+(dqResults[n]?.issues?.length||0),0);
+  const critIssues = names.reduce((s,n)=>s+(dqResults[n]?.issues?.filter(i=>i.sev==='critical').length||0),0);
+  const rulesCount = Object.keys(businessRules||{}).length;
 
-    // mini bars
-    const dims = [
-      ['Complétude', dq.completeness, TEAL],
-      ['Taux distincts', dq.uniqueness, [26,158,106]],
-      ['Validité', dq.validity, [224,138,32]],
-    ];
-    let bx = margin + contentW - 120;
-    dims.forEach(([lbl, val, col]) => {
-      doc.setFontSize(7);
-      doc.setTextColor(...LIGHT);
-      doc.text(lbl, bx, y+8);
-      doc.setFillColor(30,36,51);
-      doc.roundedRect(bx, y+10, 35, 2, 1, 1, 'F');
-      doc.setFillColor(...col);
-      doc.roundedRect(bx, y+10, Math.max(35*val/100,1), 2, 1, 1, 'F');
-      doc.setTextColor(...col);
-      doc.setFont('helvetica','bold');
-      doc.text(Math.round(val)+'%', bx+37, y+12);
-      doc.setFont('helvetica','normal');
-      bx += 42;
-    });
-    y += 28;
+  const statItems = [
+    ['Tables', totalTables, TEAL],
+    ['Score moyen', avgScore+'%', scoreCol(avgScore)],
+    ['Anomalies', totalIssues, totalIssues>0?RED:GREEN],
+    ['Critiques', critIssues, critIssues>0?RED:GREEN],
+  ];
+  let sx = margin+8;
+  statItems.forEach(([lbl,val,col],i) => {
+    doc.setFillColor(...BG3); doc.roundedRect(sx,155,38,18,2,2,'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...col);
+    doc.text(String(val), sx+4, 166);
+    doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(...LIGHT);
+    doc.text(lbl, sx+4, 170);
+    sx += 42;
+  });
+  if (rulesCount>0) {
+    doc.setFontSize(8); doc.setTextColor(...TEAL);
+    doc.text(rulesCount+' règle(s) métier appliquée(s)', margin+8, 190);
+  }
+  doc.setFontSize(7); doc.setTextColor(...LIGHT);
+  doc.text('Document confidentiel — Nexialog Consulting', margin+8, 285);
 
-    // ── ANOMALIES CRITIQUES ──
-    const critHigh = dq.issues.filter(i=>['critical','high'].includes(i.sev));
-    if (critHigh.length) {
-      checkPage(10 + critHigh.slice(0,5).length*8);
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(9);
-      doc.setTextColor(...NAVY);
-      doc.text('ANOMALIES CRITIQUES & ÉLEVÉES', margin, y);
-      y += 5;
+  // ── RÉSUMÉ EXÉCUTIF ──
+  doc.addPage(); y=0; renderHeader(); y=20;
+  doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(...NAVY);
+  doc.text('Résumé Exécutif', margin, y); y+=3;
+  doc.setFillColor(...RED); doc.rect(margin,y,35,0.7,'F'); y+=8;
 
-      critHigh.slice(0,8).forEach(iss => {
-        checkPage(8);
-        const sevColor = iss.sev==='critical' ? RED : [224,138,32];
-        doc.setFillColor(22,27,37);
-        doc.roundedRect(margin, y, contentW, 7, 1, 1, 'F');
-        doc.setFillColor(...sevColor);
-        doc.rect(margin, y, 2, 7, 'F');
-        doc.setFont('helvetica','bold');
-        doc.setFontSize(7.5);
-        doc.setTextColor(...sevColor);
-        doc.text((iss.field||'—').slice(0,20), margin+5, y+4.5);
-        doc.setFont('helvetica','normal');
-        doc.setTextColor(...LIGHT);
-        doc.text(iss.msg.slice(0,70), margin+45, y+4.5);
-        y += 8;
-      });
-      if (critHigh.length > 8) {
-        doc.setFontSize(7); doc.setTextColor(...LIGHT);
-        doc.text('+ '+(critHigh.length-8)+' autres anomalies — voir export Excel pour le détail complet', margin, y);
-        y += 5;
-      }
-      y += 4;
-    }
+  // Score hero
+  doc.setFillColor(...BG2); doc.roundedRect(margin,y,contentW,20,2,2,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(26); doc.setTextColor(...scoreCol(avgScore));
+  doc.text(avgScore+'%', margin+6, y+14);
+  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...LIGHT);
+  doc.text('Score qualité global · '+totalTables+' table(s) · '+totalCols+' col. · '+totalRows.toLocaleString()+' lignes', margin+28, y+10);
+  doc.text(totalIssues+' anomalies dont '+critIssues+' critiques', margin+28, y+16);
+  y+=26;
 
-    // ── PROFIL COLONNES ──
-    checkPage(20);
-    doc.setFont('helvetica','bold');
-    doc.setFontSize(9);
-    doc.setTextColor(...NAVY);
-    const sampledLabel = dq.sampled ? ` (échantillon ${(dq.sampleSize||0).toLocaleString()} lignes)` : '';
-    doc.text('PROFIL PAR COLONNE' + sampledLabel, margin, y);
-    y += 5;
+  // Tableau synthèse
+  doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
+  doc.text('Synthèse par table', margin, y); y+=4;
+  const hC=[{l:'Table',w:50},{l:'Score',w:16},{l:'Compl.',w:18},{l:'Valid.',w:16},{l:'Lignes',w:24},{l:'Conf.',w:22},{l:'Anom.',w:14}];
+  doc.setFillColor(...NAVY); doc.rect(margin,y,contentW,6,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(255,255,255);
+  let cx=margin+2; hC.forEach(c=>{doc.text(c.l,cx,y+4);cx+=c.w;}); y+=6;
+  names.forEach((name,ri)=>{
+    checkPage(6);
+    const dq=dqResults[name], sc=Math.round(dq.overallScore), conf=confidenceScore(dq);
+    if(ri%2===0){doc.setFillColor(...BG2);doc.rect(margin,y,contentW,5.5,'F');}
+    doc.setFont('helvetica','normal'); doc.setFontSize(6.5); cx=margin+2;
+    doc.setTextColor(...LIGHT); doc.text(name.slice(0,22),cx,y+3.8); cx+=hC[0].w;
+    doc.setTextColor(...scoreCol(sc)); doc.setFont('helvetica','bold'); doc.text(sc+'%',cx,y+3.8); doc.setFont('helvetica','normal'); cx+=hC[1].w;
+    doc.setTextColor(...pctCol(dq.completeness)); doc.text(Math.round(dq.completeness)+'%',cx,y+3.8); cx+=hC[2].w;
+    doc.setTextColor(...pctCol(dq.validity)); doc.text(Math.round(dq.validity)+'%',cx,y+3.8); cx+=hC[3].w;
+    doc.setTextColor(...LIGHT); doc.text(dq.rowCount.toLocaleString(),cx,y+3.8); cx+=hC[4].w;
+    if(conf){const cc=conf.level==='high'?GREEN:conf.level==='medium-high'?TEAL:AMBER; doc.setTextColor(...cc); doc.text(conf.icon+' '+conf.label,cx,y+3.8);} cx+=hC[5].w;
+    const iss=dq.issues.length; doc.setTextColor(iss?RED[0]:GREEN[0],iss?RED[1]:GREEN[1],iss?RED[2]:GREEN[2]);
+    doc.text(iss?iss+'⚠':'✓',cx,y+3.8); y+=5.5;
+  });
+  y+=6;
 
-    // Header table
-    const cols = [{l:'Colonne',w:50},{l:'Type',w:18},{l:'Complétude',w:22},{l:'Taux distincts',w:18},{l:'Validité',w:18},{l:'Nulls',w:18},{l:'Anomalies',w:20}];
-    doc.setFillColor(...NAVY);
-    doc.rect(margin, y, contentW, 6, 'F');
-    doc.setFont('helvetica','bold');
-    doc.setFontSize(7);
-    doc.setTextColor(255,255,255);
-    let cx = margin+2;
-    cols.forEach(col => { doc.text(col.l, cx, y+4); cx += col.w; });
-    y += 6;
-
-    dq.columns.forEach((col, ri) => {
+  // Règles métier
+  if(rulesCount>0){
+    checkPage(16);
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
+    doc.text('Règles métier ('+rulesCount+')', margin, y); y+=4;
+    Object.entries(businessRules||{}).slice(0,12).forEach(([col,rule],ri)=>{
       checkPage(6);
-      if (ri%2===0) { doc.setFillColor(22,27,37); doc.rect(margin, y, contentW, 5.5, 'F'); }
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(7);
-      const cColor = col.issues.length ? RED : LIGHT;
-      doc.setTextColor(...cColor);
-      cx = margin+2;
-      doc.text(col.name.slice(0,22), cx, y+3.8); cx += cols[0].w;
-      doc.setTextColor(...LIGHT);
-      doc.text(col.type, cx, y+3.8); cx += cols[1].w;
-      const pctColor = v => v>=95?[26,158,106]:v>=80?[224,138,32]:RED;
-      doc.setTextColor(...pctColor(col.completeness));
-      doc.text(col.completeness+'%', cx, y+3.8); cx += cols[2].w;
-      doc.setTextColor(...LIGHT);
-      doc.text(col.uniqueness+'%', cx, y+3.8); cx += cols[3].w;
-      doc.setTextColor(...pctColor(col.validity));
-      doc.text(col.validity+'%', cx, y+3.8); cx += cols[4].w;
-      doc.setTextColor(...LIGHT);
-      doc.text(col.nullCount.toLocaleString(), cx, y+3.8); cx += cols[5].w;
-      doc.setTextColor(col.issues.length?RED[0]:LIGHT[0], col.issues.length?RED[1]:LIGHT[1], col.issues.length?RED[2]:LIGHT[2]);
-      doc.text(col.issues.length ? col.issues.length+' ⚠' : '✓', cx, y+3.8);
-      y += 5.5;
+      if(ri%2===0){doc.setFillColor(...BG2);doc.rect(margin,y,contentW,5.5,'F');}
+      const parts=[];
+      if(rule.min!==undefined)parts.push('min:'+rule.min);
+      if(rule.max!==undefined)parts.push('max:'+rule.max);
+      if(rule.allowedValues)parts.push('domaine:['+rule.allowedValues.slice(0,3).join(',')+']');
+      if(rule.maxNullPct!==undefined)parts.push('nulls≤'+rule.maxNullPct+'%');
+      if(rule.regex)parts.push('regex');
+      doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(...TEAL);
+      doc.text(col.slice(0,22),margin+2,y+3.8);
+      doc.setFont('helvetica','normal'); doc.setTextColor(...LIGHT);
+      doc.text(parts.join(' · ').slice(0,75),margin+44,y+3.8); y+=5.5;
     });
+    y+=4;
+  }
 
-    // ── FOOTER ──
-    const pageCount = doc.getNumberOfPages();
-    for (let i=1;i<=pageCount;i++) {
-      doc.setPage(i);
-      doc.setFillColor(...NAVY);
-      doc.rect(0, 289, W, 8, 'F');
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(7);
-      doc.setTextColor(...LIGHT);
-      doc.text('Nexialog Consulting · Pipeline Doc + DQ Analyzer · Confidentiel', margin, 294);
-      doc.text('Page '+i+'/'+pageCount, W-margin, 294, {align:'right'});
+  // ── PAGE PAR TABLE ──
+  names.forEach((name)=>{
+    const dq=dqResults[name];
+    doc.addPage(); y=0; renderHeader(); y=20;
+    const score=Math.round(dq.overallScore), conf=confidenceScore(dq);
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(...NAVY);
+    doc.text(name, margin, y); y+=3;
+    doc.setFillColor(...RED); doc.rect(margin,y,30,0.7,'F'); y+=7;
+
+    // Score hero compact
+    doc.setFillColor(...BG2); doc.roundedRect(margin,y,contentW,20,2,2,'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(22); doc.setTextColor(...scoreCol(score));
+    doc.text(score+'%',margin+5,y+13);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(...LIGHT);
+    doc.text(dq.rowCount.toLocaleString()+' lignes · '+dq.colCount+' col.',margin+26,y+8);
+    if(conf){const cc=conf.level==='high'?GREEN:conf.level==='medium-high'?TEAL:AMBER;
+      doc.setTextColor(...cc); doc.text(conf.icon+' Confiance '+conf.label,margin+26,y+14);
+      doc.setTextColor(...LIGHT); doc.setFontSize(6.5);
+      doc.text(conf.detail.slice(0,55),margin+26,y+19);}
+    const dims=[['Complétude',dq.completeness,TEAL],['Distincts',dq.uniqueness,GREEN],['Validité',dq.validity,AMBER]];
+    let bx=margin+contentW-126;
+    dims.forEach(([lbl,val,col])=>{
+      doc.setFontSize(6.5); doc.setTextColor(...LIGHT); doc.text(lbl,bx,y+8);
+      doc.setFillColor(...BG3); doc.roundedRect(bx,y+10,35,2,1,1,'F');
+      doc.setFillColor(...col); doc.roundedRect(bx,y+10,Math.max(35*val/100,1),2,1,1,'F');
+      doc.setTextColor(...col); doc.setFont('helvetica','bold'); doc.setFontSize(6.5);
+      doc.text(Math.round(val)+'%',bx+37,y+12); doc.setFont('helvetica','normal'); bx+=43;
+    });
+    y+=26;
+
+    // Histogrammes
+    const numCols=dq.columns.filter(c=>c.type==='NUMERIC'&&c.stats?.histogram?.length).slice(0,4);
+    if(numCols.length){
+      checkPage(32);
+      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
+      doc.text('DISTRIBUTIONS', margin, y); y+=4;
+      const histW=(contentW-(numCols.length-1)*4)/numCols.length, histH=18;
+      numCols.forEach((col,ci)=>{
+        const hx=margin+ci*(histW+4), hist=col.stats.histogram;
+        const maxV=Math.max(...hist,1);
+        doc.setFillColor(...BG2); doc.rect(hx,y,histW,histH+8,'F');
+        doc.setFontSize(6); doc.setTextColor(...LIGHT);
+        doc.text(col.name.slice(0,14),hx+2,y+4);
+        if(col.stats.mean!==undefined){doc.setTextColor(...TEAL);doc.text('μ='+Math.round(col.stats.mean*100)/100,hx+histW-2,y+4,{align:'right'});}
+        hist.forEach((val,bi)=>{
+          const bh=(val/maxV)*histH, bw=histW/hist.length;
+          doc.setFillColor(...TEAL);
+          doc.rect(hx+bi*bw,y+6+(histH-bh),bw-0.3,bh,'F');
+        });
+        if(col.stats.outlierCount>0){doc.setFontSize(5.5);doc.setTextColor(...AMBER);doc.text(col.stats.outlierCount+' outliers',hx+2,y+histH+10);}
+      });
+      y+=histH+14;
     }
+
+    // Anomalies
+    const issues=dq.issues.filter(i=>['critical','high'].includes(i.sev));
+    if(issues.length){
+      checkPage(12+Math.min(issues.length,8)*8);
+      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
+      doc.text('ANOMALIES & VIOLATIONS', margin, y); y+=4;
+      issues.slice(0,8).forEach(iss=>{
+        checkPage(8);
+        const sc=iss.sev==='critical'?RED:AMBER;
+        doc.setFillColor(...BG2); doc.roundedRect(margin,y,contentW,7,1,1,'F');
+        doc.setFillColor(...sc); doc.rect(margin,y,2,7,'F');
+        doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(...sc);
+        doc.text((iss.field||'—').slice(0,20),margin+5,y+4.5);
+        doc.setFont('helvetica','normal'); doc.setTextColor(...LIGHT);
+        doc.text(iss.msg.slice(0,72),margin+44,y+4.5); y+=8;
+      });
+      if(issues.length>8){doc.setFontSize(6.5);doc.setTextColor(...LIGHT);doc.text('+ '+(issues.length-8)+' autres',margin,y);y+=5;}
+      y+=4;
+    }
+
+    // Profil colonnes
+    checkPage(18);
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
+    const sl=(dq.sampled||dq.streaming)?' — échantillon':'  — exact';
+    doc.text('PROFIL PAR COLONNE'+sl, margin, y); y+=4;
+    const pC=[{l:'Colonne',w:48},{l:'Type',w:16},{l:'Compl.',w:16},{l:'Dist.',w:16},{l:'Valid.',w:16},{l:'Nulls',w:16},{l:'Règle',w:14},{l:'Anom.',w:12}];
+    doc.setFillColor(...NAVY); doc.rect(margin,y,contentW,6,'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(255,255,255);
+    cx=margin+2; pC.forEach(c=>{doc.text(c.l,cx,y+4);cx+=c.w;}); y+=6;
+    dq.columns.forEach((col,ri)=>{
+      checkPage(6);
+      if(ri%2===0){doc.setFillColor(...BG2);doc.rect(margin,y,contentW,5.5,'F');}
+      const hasRule=!!(businessRules||{})[col.name];
+      const hasViol=col.issues.some(i=>i.msg&&(i.msg.includes('borne')||i.msg.includes('domaine')||i.msg.includes('seuil')||i.msg.includes('Format')));
+      doc.setFont('helvetica','normal'); doc.setFontSize(6.5); cx=margin+2;
+      doc.setTextColor(...(col.issues.length?RED:LIGHT)); doc.text(col.name.slice(0,20),cx,y+3.8); cx+=pC[0].w;
+      doc.setTextColor(...LIGHT); doc.text(col.type||'',cx,y+3.8); cx+=pC[1].w;
+      doc.setTextColor(...pctCol(col.completeness)); doc.text(col.completeness+'%',cx,y+3.8); cx+=pC[2].w;
+      doc.setTextColor(...LIGHT); doc.text(col.uniqueness+'%',cx,y+3.8); cx+=pC[3].w;
+      doc.setTextColor(...pctCol(col.validity)); doc.text(col.validity+'%',cx,y+3.8); cx+=pC[4].w;
+      doc.setTextColor(...LIGHT); doc.text(String(col.nullCount||0),cx,y+3.8); cx+=pC[5].w;
+      doc.setTextColor(hasViol?RED[0]:hasRule?GREEN[0]:LIGHT[0],hasViol?RED[1]:hasRule?GREEN[1]:LIGHT[1],hasViol?RED[2]:hasRule?GREEN[2]:LIGHT[2]);
+      doc.text(hasViol?'✗':hasRule?'✓':'—',cx,y+3.8); cx+=pC[6].w;
+      doc.setTextColor(col.issues.length?RED[0]:GREEN[0],col.issues.length?RED[1]:GREEN[1],col.issues.length?RED[2]:GREEN[2]);
+      doc.text(col.issues.length?col.issues.length+'⚠':'✓',cx,y+3.8); y+=5.5;
+    });
   });
 
-  doc.save('rapport_dq_nexialog.pdf');
+  // Footers
+  const pageCount=doc.getNumberOfPages();
+  for(let i=1;i<=pageCount;i++){
+    doc.setPage(i);
+    doc.setFillColor(...NAVY); doc.rect(0,289,W,8,'F');
+    doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...LIGHT);
+    doc.text('Nexialog Consulting · Pipeline Doc + DQ Analyzer · Confidentiel', margin, 294);
+    doc.text('Page '+i+'/'+pageCount, W-margin, 294, {align:'right'});
+  }
+
+  doc.save('rapport_dq_nexialog_'+new Date().toISOString().slice(0,10)+'.pdf');
 }
+
+
+
+
 
 
 // ── SCORE DE CONFIANCE DQ ──
