@@ -58,7 +58,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Access-Token"],
 )
 
 

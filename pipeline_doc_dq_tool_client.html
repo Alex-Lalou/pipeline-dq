@@ -6,7 +6,6 @@
 <title>Pipeline Doc + DQ — Nexialog Consulting [Client]</title>
 <!-- Montserrat (titres) + JetBrains Mono (code) — Segoe UI via system stack -->
 <!-- Fonts : system-ui fallback si Google Fonts non disponible (environnement hors-ligne) -->
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" onerror="this.remove()">
 <!-- Librairies JS : chargées localement si dispo (mode hors-ligne banque), sinon CDN -->
 <script>
 (function() {
@@ -68,9 +67,9 @@
   --purple:#223E55;
   --pink:  #651724;
   /* Typos — charte Nexialog */
-  --mono: 'JetBrains Mono', monospace;
+  --mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace; /* fallback system */
   --sans: 'Segoe UI', system-ui, sans-serif;   /* corps — charte */
-  --title: 'Montserrat', 'Segoe UI', sans-serif; /* titres — charte */
+  --title: 'Montserrat', 'Segoe UI', system-ui, sans-serif; /* Google Fonts supprimé — fallback system */ /* titres — charte */
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:14px;min-height:100vh;overflow-x:hidden}
@@ -2241,10 +2240,19 @@ function esc(s) {
 // ── MODE PROXY OU DIRECT ──
 // Si PROXY_URL est défini, l'outil passe par le backend (mode client banque).
 // Sinon, appel direct Anthropic avec clé front (mode interne Nexialog).
-const PROXY_URL = 'http://localhost:8000'; // Proxy backend obligatoire — clé API côté serveur
+// ── MODE CLIENT BANQUE — PROXY UNIQUEMENT ──
+const PROXY_URL = 'http://localhost:8000';
+// Token d'accès optionnel — doit correspondre à ACCESS_TOKEN côté serveur
+const PROXY_ACCESS_TOKEN = '';
 
 function getApiUrl() {
-  return PROXY_URL ? PROXY_URL + '/api/analyse' : 'https://api.anthropic.com/v1/messages';
+  return PROXY_URL + '/api/analyse'; // Proxy uniquement — pas d'appel direct Anthropic
+}
+
+function buildHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (PROXY_ACCESS_TOKEN) h['X-Access-Token'] = PROXY_ACCESS_TOKEN;
+  return h;
 }
 
 // Token d'accès pour le proxy (optionnel — doit correspondre à ACCESS_TOKEN côté serveur)
