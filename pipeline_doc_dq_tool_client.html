@@ -5,11 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pipeline Doc + DQ — Nexialog Consulting [Client]</title>
 <!-- Montserrat (titres) + JetBrains Mono (code) — Segoe UI via system stack -->
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Fonts : system-ui fallback si Google Fonts non disponible (environnement hors-ligne) -->
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" onerror="this.remove()">
+<!-- Librairies JS : chargées localement si dispo (mode hors-ligne banque), sinon CDN -->
+<script>
+(function() {
+  const libs = [
+    { local: '/static/papaparse.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js' },
+    { local: '/static/xlsx.full.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js' },
+    { local: '/static/mermaid.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js' },
+    { local: '/static/jspdf.umd.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js' },
+  ];
+  // Tenter le chargement local d'abord, fallback CDN si échec
+  function loadScript(src, fallback) {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onerror = fallback ? () => { const f = document.createElement('script'); f.src = fallback; document.head.appendChild(f); } : null;
+    document.head.appendChild(s);
+  }
+  libs.forEach(l => loadScript(l.local, l.cdn));
+})();
+</script>
 <style>
 :root {
   /* ══ NEXIALOG CHARTE GRAPHIQUE 2025 — couleurs exactes ══ */
@@ -359,16 +375,16 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
 /* ─── API KEY BANNER ─── */
 #apikey-bar{background:#002060;border-bottom:2px solid #B10031;padding:10px 24px;display:flex;align-items:center;gap:12px;flex-shrink:0}
 #apikey-bar.hidden{display:none}
-.ak-lbl{font-family:'Montserrat',sans-serif;font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#D0D1D4;white-space:nowrap}
-.ak-input{flex:1;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:3px;color:#fff;font-family:monospace;font-size:12px;padding:6px 10px;outline:none}
-.ak-input:focus{border-color:#B10031}
-.ak-input::placeholder{color:rgba(255,255,255,.3)}
-.ak-btn{background:#B10031;border:none;border-radius:3px;color:#fff;font-family:'Montserrat',sans-serif;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:7px 14px;cursor:pointer;white-space:nowrap}
-.ak-btn:hover{background:#651724}
-.ak-status{font-family:monospace;font-size:10px;white-space:nowrap}
-.ak-status.ok{color:#1a9e6a}.ak-status.err{color:#B10031}
-.ak-toggle{background:none;border:none;color:rgba(255,255,255,.4);cursor:pointer;font-size:12px;padding:2px 6px;font-family:monospace}
-.ak-toggle:hover{color:#fff}
+
+
+
+
+
+
+
+
+
+
 </style>
 </head>
 <body>
@@ -395,14 +411,6 @@ body{background:var(--bg0);color:var(--text0);font-family:var(--sans);font-size:
   </div>
 </div>
 
-<!-- API KEY BAR -->
-<div id="apikey-bar" style="display:none!important" class="hidden">
-  <div class="ak-lbl">Clé API Anthropic</div>
-  <input class="ak-input" type="password" id="ak-input" placeholder="sk-ant-api03-…" autocomplete="off">
-  <button class="ak-btn" onclick="saveKey()">✓ Enregistrer</button>
-  <span class="ak-status" id="ak-status"></span>
-  <button class="ak-toggle" onclick="toggleKeyVis()" title="Afficher/masquer">◎</button>
-</div>
 <div class="body">
 
 <!-- ═══ LEFT PANEL ═══ -->
@@ -2250,7 +2258,7 @@ function buildHeaders() {
     return h;
   }
   // Mode direct : clé en front (usage interne uniquement)
-  const key = localStorage.getItem('nxl_key') || '';
+  const key = '' || '';
   const h = { 'Content-Type': 'application/json' };
   if (key) {
     h['x-api-key'] = key;
@@ -2260,28 +2268,8 @@ function buildHeaders() {
   return h;
 }
 
-function saveKey() {
-  const v = document.getElementById('ak-input').value.trim();
-  if (!v.startsWith('sk-ant-')) { setAkStatus('Format invalide', false); return; }
-  // localStorage désactivé en mode client — clé gérée côté serveur
-  // localStorage.setItem('nxl_key', v);
-  setAkStatus('✓ Clé enregistrée', true);
-  setTimeout(() => {
-    document.getElementById('apikey-bar').classList.add('hidden');
-    document.getElementById('ak-open-btn').style.display = 'inline-block';
-  }, 1000);
-}
 
-function setAkStatus(msg, ok) {
-  const el = document.getElementById('ak-status');
-  el.textContent = msg;
-  el.className = 'ak-status ' + (ok ? 'ok' : 'err');
-}
 
-function toggleKeyVis() {
-  const i = document.getElementById('ak-input');
-  i.type = i.type === 'password' ? 'text' : 'password';
-}
 
 function openKeyBar() {
   document.getElementById('apikey-bar').classList.remove('hidden');
@@ -2291,7 +2279,7 @@ function openKeyBar() {
 
 // Init
 (function() {
-  const saved = localStorage.getItem('nxl_key');
+  const saved = '';
   if (saved) {
     document.getElementById('ak-input').value = saved;
     document.getElementById('ak-open-btn').style.display = 'inline-block';

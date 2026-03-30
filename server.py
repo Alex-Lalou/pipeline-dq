@@ -13,9 +13,26 @@ Anthropic directement — la clé API ne sort jamais du serveur.
 import os
 import httpx
 import logging
+import time
+from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# Rate limiting simple en mémoire (par IP)
+RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "20"))  # max 20 requêtes/minute par IP
+_rate_store = defaultdict(list)
+
+def check_rate_limit(client_ip: str):
+    now = time.time()
+    window = 60  # 1 minute
+    _rate_store[client_ip] = [t for t in _rate_store[client_ip] if now - t < window]
+    if len(_rate_store[client_ip]) >= RATE_LIMIT_RPM:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Trop de requêtes — limite : {RATE_LIMIT_RPM} req/min."
+        )
+    _rate_store[client_ip].append(now)
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -76,6 +93,8 @@ async def analyse(request: Request):
     - Clé API stockée côté serveur uniquement
     """
     check_auth(request)
+    client_ip = request.client.host if request.client else "unknown"
+    check_rate_limit(client_ip)
 
     if not ANTHROPIC_API_KEY:
         raise HTTPException(
@@ -93,9 +112,17 @@ async def analyse(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Body JSON invalide.")
 
-    # Validation minimale : on attend model + messages
+    # Validation de schéma stricte
     if "model" not in body or "messages" not in body:
         raise HTTPException(status_code=400, detail="Champs 'model' et 'messages' requis.")
+    if not isinstance(body["messages"], list) or len(body["messages"]) == 0:
+        raise HTTPException(status_code=400, detail="'messages' doit être une liste non vide.")
+    if len(body["messages"]) > 10:
+        raise HTTPException(status_code=400, detail="Trop de messages (max 10).")
+    # Autoriser uniquement les modèles Anthropic connus
+    allowed_models = {"claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"}
+    if body.get("model") not in allowed_models:
+        raise HTTPException(status_code=400, detail=f"Modèle non autorisé : {body.get('model')}")
 
     async with httpx.AsyncClient(timeout=200.0) as client:
         response = await client.post(
@@ -122,6 +149,12 @@ async def analyse(request: Request):
     return response.json()
 
 
+# Servir les librairies JS locales si présentes dans ./static/
+import os as _os
+_static_dir = _os.path.join(_os.path.dirname(__file__), "static")
+if _os.path.exists(_static_dir):
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
 # Servir le fichier HTML statique si présent dans le même dossier
 @app.get("/")
 def serve_frontend():
@@ -136,7 +169,9 @@ if __name__ == "__main__":
     print("=" * 55)
     print("  Pipeline Doc + DQ Analyzer — Serveur proxy")
     print("=" * 55)
-    print(f"  Clé API : {'✓ configurée' if ANTHROPIC_API_KEY else '✗ MANQUANTE'}")
+    print(f"  Clé API  : {'✓ configurée' if ANTHROPIC_API_KEY else '✗ MANQUANTE'}")
+  print(f"  Rate limit: {RATE_LIMIT_RPM} req/min/IP")
+  print(f"  CORS      : {ALLOWED_ORIGINS}")
     print(f"  URL     : http://localhost:8000")
     print(f"  Health  : http://localhost:8000/health")
     print("=" * 55)
