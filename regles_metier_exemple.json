@@ -1,0 +1,36 @@
+{
+  "PD": {
+    "min": 0.001,
+    "max": 0.99,
+    "maxNullPct": 0
+  },
+  "LGD": {
+    "min": 0,
+    "max": 1,
+    "maxNullPct": 0
+  },
+  "EAD": {
+    "min": 0,
+    "maxNullPct": 0
+  },
+  "STATUT": {
+    "allowedValues": ["ACTIF", "DEFAUT", "RESTRUCTURE", "REMBOURSE"],
+    "maxNullPct": 0
+  },
+  "SEGMENT": {
+    "allowedValues": ["RETAIL", "PME", "CORPORATE", "SOUVERAIN"],
+    "maxNullPct": 0
+  },
+  "TAUX_NOMINAL": {
+    "min": 0,
+    "max": 30
+  },
+  "CLASSE_RISQUE": {
+    "allowedValues": ["1", "2", "3", "4"],
+    "maxNullPct": 0
+  },
+  "ID_CONTRAT": {
+    "regex": "^CTR[0-9]+$",
+    "maxNullPct": 0
+  }
+}

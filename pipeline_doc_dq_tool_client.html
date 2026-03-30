@@ -1975,6 +1975,36 @@ function exportPDF() {
   doc.save('rapport_dq_nexialog.pdf');
 }
 
+// ── SCORE DE CONFIANCE DQ ──
+function confidenceScore(dq) {
+  if (!dq) return null;
+  const total = dq.rowCount || 0;
+  const sample = dq.sampleSize || total;
+  const ratio = total > 0 ? sample / total : 1;
+
+  if (!dq.sampled && !dq.streaming) {
+    return { level: 'high', label: 'Élevée', icon: '●', color: 'var(--green)',
+      detail: `Calcul exact sur ${total.toLocaleString()} lignes` };
+  }
+  if (sample >= 50000 || ratio >= 0.9) {
+    return { level: 'medium-high', label: 'Bonne', icon: '◕', color: 'var(--nxl-teal)',
+      detail: `Échantillon ${sample.toLocaleString()}/${total.toLocaleString()} lignes (${Math.round(ratio*100)}%)` };
+  }
+  if (sample >= 10000 || ratio >= 0.5) {
+    return { level: 'medium', label: 'Moyenne', icon: '◑', color: 'var(--amber)',
+      detail: `Échantillon ${sample.toLocaleString()}/${total.toLocaleString()} lignes (${Math.round(ratio*100)}%)` };
+  }
+  return { level: 'low', label: 'Faible', icon: '○', color: 'var(--red)',
+    detail: `Échantillon réduit : ${sample.toLocaleString()}/${total.toLocaleString()} lignes — interpréter avec précaution` };
+}
+
+function renderConfidenceBadge(dq) {
+  const c = confidenceScore(dq);
+  if (!c) return '';
+  return `<span title="${c.detail}" style="font-family:var(--mono);font-size:10px;color:${c.color};cursor:help;margin-left:8px">${c.icon} Confiance ${c.label}</span>`;
+}
+
+
 function renderDQData() {
   const tables = Object.entries(dqResults).filter(([k]) => k !== '__compare__');
   if (!tables.length) return '<div class="notice notice-amber">Aucune table profilée. Importez des fichiers et lancez l\'analyse.</div>';
@@ -2011,7 +2041,7 @@ function renderDQData() {
     const highIssues = dq.issues.filter(i=>i.sev==='high').length;
     html += `<div class="panel fu" style="margin-bottom:14px">
       <div class="panel-hdr">
-        <div class="panel-title" style="color:${scoreColor(score)}">${esc(name)} <span style="font-size:18px;margin-left:4px">${score}%</span></div>
+        <div class="panel-title" style="color:${scoreColor(score)}">${esc(name)} <span style="font-size:18px;margin-left:4px">${score}%</span>${renderConfidenceBadge(dq)}</div>
         <div style="font-size:10px;color:var(--text2);font-family:var(--mono)">${dq.rowCount.toLocaleString()} lignes · ${dq.colCount} colonnes</div>
         ${dq.sampled ? `<span class="sample-badge">⚡ échantillon ${Number(dq.sampleSize).toLocaleString()} lignes</span>` : ''}
         <button class="btn btn-ghost" style="padding:4px 10px;font-size:9px" onclick="selDBTable='${esc(name)}';setTab('profiling',null)">Profil détaillé →</button>
@@ -2237,16 +2267,14 @@ function esc(s) {
 // ═══════════════════════════════════════════════════
 // ─── API KEY MANAGEMENT ───────────────────────────
 // ═══════════════════════════════════════════════════
-// ── MODE PROXY OU DIRECT ──
-// Si PROXY_URL est défini, l'outil passe par le backend (mode client banque).
-// Sinon, appel direct Anthropic avec clé front (mode interne Nexialog).
 // ── MODE CLIENT BANQUE — PROXY UNIQUEMENT ──
+// Toutes les requêtes IA passent par le backend proxy.
+// Aucun appel direct à Anthropic depuis le navigateur.
 const PROXY_URL = 'http://localhost:8000';
-// Token d'accès optionnel — doit correspondre à ACCESS_TOKEN côté serveur
-const PROXY_ACCESS_TOKEN = '';
+const PROXY_ACCESS_TOKEN = ''; // Optionnel — doit correspondre à ACCESS_TOKEN sur le serveur
 
 function getApiUrl() {
-  return PROXY_URL + '/api/analyse'; // Proxy uniquement — pas d'appel direct Anthropic
+  return PROXY_URL + '/api/analyse';
 }
 
 function buildHeaders() {
@@ -2254,49 +2282,6 @@ function buildHeaders() {
   if (PROXY_ACCESS_TOKEN) h['X-Access-Token'] = PROXY_ACCESS_TOKEN;
   return h;
 }
-
-// Token d'accès pour le proxy (optionnel — doit correspondre à ACCESS_TOKEN côté serveur)
-const PROXY_ACCESS_TOKEN = ''; // Laisser vide si pas de token configuré
-
-function buildHeaders() {
-  if (PROXY_URL) {
-    // Mode proxy : pas de clé API dans les headers, c'est le serveur qui gère
-    const h = { 'Content-Type': 'application/json' };
-    if (PROXY_ACCESS_TOKEN) h['X-Access-Token'] = PROXY_ACCESS_TOKEN;
-    return h;
-  }
-  // Mode direct : clé en front (usage interne uniquement)
-  const key = '' || '';
-  const h = { 'Content-Type': 'application/json' };
-  if (key) {
-    h['x-api-key'] = key;
-    h['anthropic-version'] = '2023-06-01';
-    h['anthropic-dangerous-direct-browser-access'] = 'true';
-  }
-  return h;
-}
-
-
-
-
-function openKeyBar() {
-  document.getElementById('ak-input').focus();
-}
-
-// Init
-(function() {
-  const saved = '';
-  if (saved) {
-    document.getElementById('ak-input').value = saved;
-    setAkStatus('✓ Clé chargée', true);
-  } else {
-    // No key and not on claude.ai proxy → show banner
-    const needsKey = !window.location.hostname.includes('claude.ai') && window.location.protocol !== 'blob:';
-    if (needsKey) {
-    } else {
-    }
-  }
-})();
 
 
 
