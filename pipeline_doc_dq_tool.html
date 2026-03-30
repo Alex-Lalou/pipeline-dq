@@ -2499,7 +2499,7 @@ function applyAllBusinessRules() {
 
 
 // ─── RÈGLES MÉTIER CONFIGURABLES ───────────────────────────
-let businessRules = {}; // { colName: { min, max, maxNullPct, allowed, regex } }
+// (businessRules déclaré plus haut)
 
 function renderRulesEditor() {
   const names = Object.keys(dqResults).filter(k => k !== '__compare__');
@@ -2801,7 +2801,7 @@ function copyMermaidCode() {
 
 
 // ─── RÈGLES MÉTIER CONFIGURABLES ──────────────────────────────
-let businessRules = {}; // { tableName: { colName: { minVal, maxVal, allowedVals, maxNullPct } } }
+// (businessRules déclaré plus haut)
 
 function getRules(table, col) {
   return (businessRules[table] || {})[col] || {};
@@ -3349,7 +3349,7 @@ function showMermaidStep(tableId) {
 // ─── COMPARISON MODE ───────────────────────────────
 // ═══════════════════════════════════════════════════
 let cmpData = { a: null, b: null };
-let businessRules = {}; // { colName: { min, max, allowedValues, maxNullPct, regex } }
+// (businessRules déclaré plus haut)
 let compareResult = null;
 
 function loadCompareFile(side, file) {
